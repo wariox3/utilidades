@@ -1,39 +1,40 @@
 import subprocess
-import os
+import datetime
+from decouple import config
+
 
 # Configuración de la conexión
-host = "tu-servidor-remoto.com"
-port = 3306
-usuario = "usuario_mysql"
-contrasena = "contrasena_mysql"
-basedatos = "nombre_base_datos"
-tabla_excluir = "tabla_a_excluir"
-archivo_salida = "dump_sin_tabla.sql"
+host = config('DATABASE_HOST')
+port = config('DATABASE_PORT')
+usuario = config('DATABASE_USER')
+clave = config('DATABASE_CLAVE')
+basedatos = "bdinsepltda"
+timestamp = datetime.datetime.now().strftime("%y%m%d%H%M")
+archivo_salida = f"/home/desarrollo/Escritorio/{basedatos}_{timestamp}.sql"
 
-def exportar_base_datos():
-    # Comando mysqldump con exclusión de una tabla
+def exportar_base_datos():    
+    print(port)
     comando = [
         "mysqldump",
         f"--host={host}",
         f"--port={port}",
         f"--user={usuario}",
-        f"--password={contrasena}",
+        f"--password={clave}",
         "--routines",
         "--events",
         "--single-transaction",
         "--quick",
         "--skip-lock-tables",
         basedatos,
-        f"--ignore-table={basedatos}.{tabla_excluir}"
+        f"--ignore-table={basedatos}.gen_log"
     ]
-
-    # Ejecutar el comando y guardar la salida en un archivo
-    with open(archivo_salida, "w", encoding="utf-8") as f:
-        try:
+    
+    try:
+        with open(archivo_salida, "w", encoding="utf-8") as f:
             subprocess.run(comando, check=True, stdout=f)
-            print(f"✅ Dump generado correctamente en '{archivo_salida}', excluyendo la tabla '{tabla_excluir}'.")
-        except subprocess.CalledProcessError as e:
-            print("❌ Error al generar el dump:", e)
+        print(f"✅ Dump generado correctamente: {archivo_salida}")
+    except subprocess.CalledProcessError as e:
+        print("❌ Error al generar el dump:", e)
 
 if __name__ == "__main__":
     exportar_base_datos()
