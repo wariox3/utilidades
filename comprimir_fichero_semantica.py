@@ -48,7 +48,7 @@ def main():
             AND codigo_fichero_tipo_fk = 'G'
             AND YEAR(fecha) = %s
             AND MONTH(fecha) = %s
-            LIMIT 1
+            LIMIT 10000
         """
         cursor.execute(query, (año, mes))
         registros = cursor.fetchall()                      
