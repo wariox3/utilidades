@@ -92,7 +92,7 @@ def main():
                 conexion.commit()
                 print(f"BD actualizada para {registro['codigo_fichero_pk']}")            
             else:
-                print(f"Error en el servicio de compresión: {response.text}")
+                print(f"Error en el servicio de compresión fichero {registro['codigo_fichero_pk']}: {response.text}")
     except Exception as e:
         print(f"Error: {e}")
         
