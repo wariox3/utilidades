@@ -51,7 +51,7 @@ def main():
             AND error_carga = false 
             AND YEAR(fecha) = %s
             AND MONTH(fecha) = %s
-            LIMIT 200
+            LIMIT 30000
         """
         cursor.execute(query, (año, mes))
         registros = cursor.fetchall()                      
