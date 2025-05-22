@@ -4,6 +4,8 @@ from b2sdk.v2 import InMemoryAccountInfo, B2Api
 from io import BytesIO
 import requests
 import sys
+from PIL import Image
+from datetime import datetime
 
 def obtener_entero(mensaje):
     while True:
@@ -46,9 +48,10 @@ def main():
             AND codigo_modelo_fk='TteGuia' 
             AND extension='jpg' 
             AND codigo_fichero_tipo_fk = 'G'
+            AND error_carga = false 
             AND YEAR(fecha) = %s
             AND MONTH(fecha) = %s
-            LIMIT 30000
+            LIMIT 200
         """
         cursor.execute(query, (año, mes))
         registros = cursor.fetchall()                      
@@ -60,39 +63,49 @@ def main():
 
             downloaded_file = bucket.download_file_by_id(file_id)
             original_content = BytesIO()
-            downloaded_file.save(original_content)
-            original_content.seek(0)
-            files = {'file': (original_name, original_content, f'image/{registro["extension"]}')}
-            
-            response = requests.post(
-                COMPRESS_SERVICE_URL,
-                files=files,
-                data={'quality': 10, 'optimize': True}
-            )        
-            if response.status_code == 200:
-                bucket.delete_file_version(file_id=file_id, file_name=file_name)
-                print(f"Eliminado original de B2: {file_name}")
+            downloaded_file.save(original_content)            
 
-                compressed_content = BytesIO(response.content)
-                bucket.upload_bytes(
-                    data_bytes=compressed_content.getvalue(),
-                    file_name=file_name
-                )
-                print(f"Subido comprimido a B2: {file_name}")
-                
-                compressed_size = len(response.content)
+            try:
+                original_content.seek(0)
+                img = Image.open(original_content)
+                img.verify()
+                original_content.seek(0)
+                files = {'file': (original_name, original_content, f'image/{registro["extension"]}')}            
+                response = requests.post(
+                    COMPRESS_SERVICE_URL,
+                    files=files,
+                    data={'quality': 10, 'optimize': True}
+                )        
+                if response.status_code == 200:
+                    bucket.delete_file_version(file_id=file_id, file_name=file_name)                    
+                    compressed_content = BytesIO(response.content)
+                    bucket.upload_bytes(
+                        data_bytes=compressed_content.getvalue(),
+                        file_name=file_name
+                    )
+                    print(f"Eliminado el original y subido comprimido a B2: {file_name}")                    
+                    compressed_size = len(response.content)
+                    update_query = """
+                        UPDATE doc_fichero 
+                        SET comprimido = true, 
+                            tamano = %s
+                        WHERE codigo_fichero_pk = %s
+                    """
+                    cursor.execute(update_query, (compressed_size, registro['codigo_fichero_pk']))
+                    conexion.commit()   
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] periodo {año}-{mes:02d} {file_name} bd actualizada registro {registro['codigo_fichero_pk']}")        
+                else:
+                    print(f"Error en el servicio de compresión fichero {registro['codigo_fichero_pk']}: {response.text}")
+            except Exception as e:
+                print(f"El archivo {file_name} no es una imagen válida: {e}")
                 update_query = """
                     UPDATE doc_fichero 
-                    SET comprimido = true, 
-                        tamano = %s,
-                        extension = 'jpg'
+                    SET error_carga = true
                     WHERE codigo_fichero_pk = %s
                 """
-                cursor.execute(update_query, (compressed_size, registro['codigo_fichero_pk']))
-                conexion.commit()
-                print(f"BD actualizada para {registro['codigo_fichero_pk']}")            
-            else:
-                print(f"Error en el servicio de compresión fichero {registro['codigo_fichero_pk']}: {response.text}")
+                cursor.execute(update_query, (registro['codigo_fichero_pk'],))  # <-- Coma añadida
+                conexion.commit()                            
+                continue            
     except Exception as e:
         print(f"Error: {e}")
         
