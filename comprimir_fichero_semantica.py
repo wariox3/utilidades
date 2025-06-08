@@ -58,12 +58,23 @@ def main():
         for registro in registros:
             original_name = f"{registro['codigo_fichero_pk']}.{registro['extension']}"
             file_name = f"{DIRECTORIO_ALMACENAMIENTO}/fichero/{registro['codigo_fichero_pk']}.{registro['extension']}"
-            file_version = bucket.get_file_info_by_name(file_name)
-            file_id = file_version.id_
-
-            downloaded_file = bucket.download_file_by_id(file_id)
-            original_content = BytesIO()
-            downloaded_file.save(original_content)            
+                        
+            try:
+                file_version = bucket.get_file_info_by_name(file_name)
+                file_id = file_version.id_
+                downloaded_file = bucket.download_file_by_id(file_id)
+                original_content = BytesIO()
+                downloaded_file.save(original_content)
+            except Exception as e:
+                print(f"Archivo no encontrado en B2: {file_name} ({e})")
+                update_query = """
+                    UPDATE doc_fichero 
+                    SET error_carga = true
+                    WHERE codigo_fichero_pk = %s
+                """
+                cursor.execute(update_query, (registro['codigo_fichero_pk'],))
+                conexion.commit()
+                continue                              
 
             try:
                 original_content.seek(0)
