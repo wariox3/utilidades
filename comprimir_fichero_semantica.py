@@ -30,7 +30,7 @@ def main():
         'password': config('DATABASE_CLAVE'),
         'host': config('DATABASE_HOST'),
         'port': config('DATABASE_PORT'),
-        'database': 'bdenergy'
+        'database': config('DATABASE_NAME')
     }
     COMPRESS_SERVICE_URL = "http://boro.semantica.com.co/comprimir"
     try:
@@ -95,7 +95,14 @@ def main():
                     conexion.commit()   
                     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] periodo {año}-{mes:02d} {file_name} bd actualizada registro {registro['codigo_fichero_pk']}")        
                 else:
-                    print(f"Error en el servicio de compresión fichero {registro['codigo_fichero_pk']}: {response.text}")
+                    print(f"Error en el servicio de compresión fichero {registro['codigo_fichero_pk']}: {response.text}")                
+                    update_query = """
+                        UPDATE doc_fichero 
+                        SET error_carga = true
+                        WHERE codigo_fichero_pk = %s
+                    """
+                    cursor.execute(update_query, (registro['codigo_fichero_pk'],))
+                    conexion.commit()                    
             except Exception as e:
                 print(f"El archivo {file_name} no es una imagen válida: {e}")
                 update_query = """
@@ -103,7 +110,7 @@ def main():
                     SET error_carga = true
                     WHERE codigo_fichero_pk = %s
                 """
-                cursor.execute(update_query, (registro['codigo_fichero_pk'],))  # <-- Coma añadida
+                cursor.execute(update_query, (registro['codigo_fichero_pk'],))
                 conexion.commit()                            
                 continue            
     except Exception as e:
