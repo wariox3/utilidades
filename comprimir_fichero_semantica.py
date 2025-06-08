@@ -3,7 +3,6 @@ import mysql.connector
 from b2sdk.v2 import InMemoryAccountInfo, B2Api
 from io import BytesIO
 import requests
-import sys
 from PIL import Image
 from datetime import datetime
 
@@ -33,6 +32,7 @@ def main():
         'database': config('DATABASE_NAME')
     }
     COMPRESS_SERVICE_URL = "http://boro.semantica.com.co/comprimir"
+    DIRECTORIO_ALMACENAMIENTO=config('DIRECTORIO_ALMACENAMIENTO')
     try:
         info = InMemoryAccountInfo()
         b2_api = B2Api(info)
@@ -57,7 +57,7 @@ def main():
         registros = cursor.fetchall()                      
         for registro in registros:
             original_name = f"{registro['codigo_fichero_pk']}.{registro['extension']}"
-            file_name = f"energy/fichero/{registro['codigo_fichero_pk']}.{registro['extension']}"
+            file_name = f"{DIRECTORIO_ALMACENAMIENTO}/fichero/{registro['codigo_fichero_pk']}.{registro['extension']}"
             file_version = bucket.get_file_info_by_name(file_name)
             file_id = file_version.id_
 
