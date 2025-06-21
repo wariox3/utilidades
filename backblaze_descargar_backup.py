@@ -4,7 +4,7 @@ from decouple import config
 import os
 
 directorio_destino = "/home/desarrollo/Escritorio/backup/"
-cantidad = 500
+cantidad = 1
 def listar_archivos(bucket_name):    
     info = InMemoryAccountInfo()
     b2_api = B2Api(info)
