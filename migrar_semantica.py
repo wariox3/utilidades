@@ -30,7 +30,7 @@ def main():
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
 
         query = """
-            SELECT * FROM gen_tercero LIMIT 100000
+            SELECT * FROM gen_tercero where codigo_tercero_pk > 9335 LIMIT 100000
         """
         cursor.execute(query)
         registros = cursor.fetchall()                      
@@ -49,12 +49,15 @@ def main():
                 correo = registro['correo']
                 if not correo or not isinstance(correo, str) or '@' not in correo:
                     correo = "correo@cliente.com"
+                direccion = "Conocida"
+                if registro['direccion']:
+                    direccion = registro['direccion'][:100]
                 values = (
                     registro['codigo_tercero_pk'],
                     6,
                     registro['numero_identificacion'],
                     registro['nombre_corto'],
-                    registro['direccion'],
+                    direccion,
                     registro['telefono'],
                     correo,
                     cliente,
