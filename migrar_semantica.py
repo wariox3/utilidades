@@ -30,7 +30,7 @@ def main():
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
 
         query = """
-            SELECT * FROM gen_tercero LIMIT 100
+            SELECT * FROM gen_tercero LIMIT 100000
         """
         cursor.execute(query)
         registros = cursor.fetchall()                      
