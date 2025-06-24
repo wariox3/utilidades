@@ -2,7 +2,7 @@ import pandas as pd
 import json
 
 # Leer el archivo Excel
-excel_file = '/home/desarrollo/Escritorio/puc_reddoc.xlsx'  # Reemplaza esto con la ruta de tu archivo Excel
+excel_file = '/home/desarrollo/Escritorio/ConCuenta.xlsx'  # Reemplaza esto con la ruta de tu archivo Excel
 df = pd.read_excel(excel_file)
 
 # Transformar los datos al formato requerido
