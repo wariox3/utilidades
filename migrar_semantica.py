@@ -49,7 +49,7 @@ def procesar_contactos():
     
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
-        batch_size = 5000
+        batch_size = 1000
         offset = 0        
         cursor.execute("SELECT COUNT(*) AS total FROM gen_tercero")
         result = cursor.fetchone()        
@@ -131,9 +131,10 @@ def procesar_movimientos():
     conexion, cursor, pg_conn, pg_cursor = get_database_connections()    
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
-        batch_size = 100
+        anio = 2020
+        batch_size = 1000
         offset = 0        
-        cursor.execute("SELECT COUNT(*) AS total FROM fin_movimiento")
+        cursor.execute(f"SELECT COUNT(*) AS total FROM fin_movimiento WHERE anio={anio}")
         result = cursor.fetchone()        
         total_records = result['total']
         print(f"Iniciando migración de {total_records} registros...")
@@ -148,7 +149,8 @@ def procesar_movimientos():
                     fin_movimiento m 
                     LEFT JOIN fin_comprobante c ON m.codigo_comprobante_fk = c.codigo_comprobante_pk 
                     LEFT JOIN fin_cuenta cu ON m.codigo_cuenta_fk = cu.codigo_cuenta_pk 
-                    LEFT JOIN fin_centro_costo cc ON m.codigo_centro_costo_fk = cc.codigo_centro_costo_pk 
+                    LEFT JOIN fin_centro_costo cc ON m.codigo_centro_costo_fk = cc.codigo_centro_costo_pk
+                WHERE m.anio={anio} 
                 ORDER BY m.codigo_movimiento_pk 
                 LIMIT {batch_size} OFFSET {offset}
             """
