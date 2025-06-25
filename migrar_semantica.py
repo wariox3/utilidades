@@ -2,7 +2,7 @@ from decouple import config
 import mysql.connector
 import psycopg2
 import sys
-
+import traceback
 def get_database_connections():    
     parametros = {
         'user': config('DATABASE_USER'),
@@ -43,28 +43,28 @@ def close_connections(conexion, pg_conn):
     except Exception as e:
         print(f"Error al cerrar conexiones: {e}")   
 
-def procesar_contactos():    
+def procesar_contactos():
     pg_schema = config('PG_SCHEMA_NAME', default='')
     conexion, cursor, pg_conn, pg_cursor = get_database_connections()
     
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
-
-        query = """
-            SELECT * FROM gen_tercero where codigo_tercero_pk >= 17405 LIMIT 100000
-        """
-        cursor.execute(query)
-        registros = cursor.fetchall()                      
-        
-        for registro in registros:                   
-            try:
-                insert_query = f"""
-                    INSERT INTO {pg_schema}.gen_contacto 
-                    (id, identificacion_id, numero_identificacion, nombre_corto, direccion, telefono, correo, cliente, proveedor, empleado, ciudad_id,
-                    regimen_id, tipo_persona_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING;
-                """
+        batch_size = 100
+        offset = 0        
+        cursor.execute("SELECT COUNT(*) AS total FROM gen_tercero")
+        result = cursor.fetchone()        
+        total_records = result['total']
+        print(f"Iniciando migración de {total_records} registros...")
+        while offset < total_records:
+            query = f"""
+                SELECT * FROM gen_tercero LIMIT {batch_size} OFFSET {offset}
+            """
+            cursor.execute(query)
+            registros = cursor.fetchall()  
+            if not registros:
+                break
+            values_batch = []
+            for registro in registros:                   
                 cliente = bool(registro['cliente'])
                 proveedor = bool(registro['proveedor'])
                 empleado = bool(registro['empleado'])
@@ -79,11 +79,17 @@ def procesar_contactos():
                     telefono = registro['celular']
                 if telefono is None or telefono == "":
                     telefono = "1"
+                nombre_corto = "Contacto"
+                if registro['nombre_corto']:
+                    nombre_corto = registro['nombre_corto']
+                numero_identificacion = "1"
+                if registro['numero_identificacion']:
+                    numero_identificacion = registro['numero_identificacion']
                 values = (
                     registro['codigo_tercero_pk'],
                     6,
-                    registro['numero_identificacion'],
-                    registro['nombre_corto'],
+                    numero_identificacion,
+                    nombre_corto,
                     direccion,
                     telefono,
                     correo,
@@ -94,14 +100,25 @@ def procesar_contactos():
                     1,
                     1
                 )
-                pg_cursor.execute(insert_query, values)
+                values_batch.append(values)
+                                
+            try:
+                insert_query = f"""
+                    INSERT INTO {pg_schema}.gen_contacto 
+                    (id, identificacion_id, numero_identificacion, nombre_corto, direccion, telefono, correo, cliente, proveedor, empleado, ciudad_id,
+                    regimen_id, tipo_persona_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING;
+                """              
+                pg_cursor.executemany(insert_query, values_batch)
                 pg_conn.commit()
-                print(f"Inserción exictosa codigo {registro['codigo_tercero_pk']}!")
+                print(f"Lote {offset//batch_size + 1} completado ({offset + len(registros)}/{total_records} registros)")
             except Exception as e:
-                print(f"Error insertando registro {registro.get('codigo_tercero_pk', 'N/A')}: {e}")
-                pg_conn.rollback()
-                sys.exit(1)
-                
+                print(f"Error en lote {offset//batch_size + 1}: {e}")
+                pg_conn.rollback()    
+                sys.exit(1)                        
+            offset += batch_size 
+
     except Exception as e:
         print(f"Error durante el procesamiento de contactos: {e}")
         sys.exit(1)
@@ -111,37 +128,36 @@ def procesar_contactos():
 
 def procesar_movimientos():
     pg_schema = config('PG_SCHEMA_NAME', default='')
-    conexion, cursor, pg_conn, pg_cursor = get_database_connections()
-    
+    conexion, cursor, pg_conn, pg_cursor = get_database_connections()    
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
-
-        query = """
-            SELECT 
-                m.*, 
-                c.codigo_interface as codigo_comprobante,
-                cu.codigo_interface as codigo_cuenta,
-                cc.codigo_interface as codigo_centro_costo
-            FROM 
-                fin_movimiento m 
-                LEFT JOIN fin_comprobante c ON m.codigo_comprobante_fk = c.codigo_comprobante_pk 
-                LEFT JOIN fin_cuenta cu ON m.codigo_cuenta_fk = cu.codigo_cuenta_pk 
-                LEFT JOIN fin_centro_costo cc ON m.codigo_centro_costo_fk = cc.codigo_centro_costo_pk 
-            ORDER BY m.codigo_movimiento_pk 
-            LIMIT 1
-        """
-        cursor.execute(query)
-        registros = cursor.fetchall()                      
-        
-        for registro in registros:                   
-            try:
-                insert_query = f"""
-                    INSERT INTO {pg_schema}.con_movimiento 
-                    (id, numero, fecha, debito, credito, base, naturaleza, detalle, cierre, comprobante_id, cuenta_id,
-                    grupo_id, periodo_id, contacto_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING;
-                """
+        batch_size = 100
+        offset = 0        
+        cursor.execute("SELECT COUNT(*) AS total FROM fin_movimiento")
+        result = cursor.fetchone()        
+        total_records = result['total']
+        print(f"Iniciando migración de {total_records} registros...")
+        while offset < total_records:
+            query = f"""
+                SELECT 
+                    m.*, 
+                    c.codigo_interface as codigo_comprobante,
+                    cu.codigo_interface as codigo_cuenta,
+                    cc.codigo_interface as codigo_centro_costo
+                FROM 
+                    fin_movimiento m 
+                    LEFT JOIN fin_comprobante c ON m.codigo_comprobante_fk = c.codigo_comprobante_pk 
+                    LEFT JOIN fin_cuenta cu ON m.codigo_cuenta_fk = cu.codigo_cuenta_pk 
+                    LEFT JOIN fin_centro_costo cc ON m.codigo_centro_costo_fk = cc.codigo_centro_costo_pk 
+                ORDER BY m.codigo_movimiento_pk 
+                LIMIT {batch_size} OFFSET {offset}
+            """
+            cursor.execute(query)
+            registros = cursor.fetchall()
+            if not registros:
+                break  
+            values_batch = []
+            for registro in registros:                                                   
                 cierre = False
                 periodo_crudo = str(registro['codigo_periodo_fk'])
                 periodo = periodo_crudo[4:6]
@@ -167,15 +183,28 @@ def procesar_movimientos():
                     registro['codigo_periodo_fk'],
                     registro['codigo_tercero_fk']
                 )
-                pg_cursor.execute(insert_query, values)
+                values_batch.append(values)
+            
+            try:
+                insert_query = f"""
+                    INSERT INTO {pg_schema}.con_movimiento 
+                    (id, numero, fecha, debito, credito, base, naturaleza, detalle, cierre, comprobante_id, cuenta_id,
+                    grupo_id, periodo_id, contacto_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING;
+                """                
+                pg_cursor.executemany(insert_query, values_batch)
                 pg_conn.commit()
-                print(f"Inserción exictosa id {registro['codigo_movimiento_pk']}!")
+                print(f"Lote {offset//batch_size + 1} completado ({offset + len(registros)}/{total_records} registros)")
             except Exception as e:
-                print(f"Error insertando registro {registro.get('codigo_movimiento_pk', 'N/A')}: {e}")
-                pg_conn.rollback()
-                sys.exit(1)
-                
+                print(f"Error en lote {offset//batch_size + 1}: {e}")
+                pg_conn.rollback()    
+                sys.exit(1)                        
+            offset += batch_size                    
     except Exception as e:
+        print(f"\nERROR CRÍTICO durante el procesamiento: {str(e)}")
+        print(f"Último offset procesado: {offset}")
+        traceback.print_exc()
         print(f"Error durante el procesamiento de movimientos: {e}")
         sys.exit(1)
         
