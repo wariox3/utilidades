@@ -49,7 +49,7 @@ def procesar_contactos():
     
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
-        batch_size = 100
+        batch_size = 5000
         offset = 0        
         cursor.execute("SELECT COUNT(*) AS total FROM gen_tercero")
         result = cursor.fetchone()        
