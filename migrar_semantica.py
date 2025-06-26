@@ -3,7 +3,8 @@ import mysql.connector
 import psycopg2
 import sys
 import traceback
-def get_database_connections():    
+
+def crear_conexiones():    
     parametros = {
         'user': config('DATABASE_USER'),
         'password': config('DATABASE_CLAVE'),
@@ -33,7 +34,7 @@ def get_database_connections():
         print(f"Error al conectar a las bases de datos: {e}")
         sys.exit(1)
 
-def close_connections(conexion, pg_conn):
+def cerrar_conexiones(conexion, pg_conn):
     try:
         if conexion and conexion.is_connected():
             conexion.close()
@@ -128,7 +129,7 @@ def procesar_contactos():
 
 def procesar_movimientos():
     pg_schema = config('PG_SCHEMA_NAME', default='')
-    conexion, cursor, pg_conn, pg_cursor = get_database_connections()    
+    conexion, cursor, pg_conn, pg_cursor = crear_conexiones()    
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
         anio = 2020
@@ -211,7 +212,7 @@ def procesar_movimientos():
         sys.exit(1)
         
     finally:
-        close_connections(conexion, pg_conn)
+        cerrar_conexiones(conexion, pg_conn)
 
 def mostrar_menu():
     print("\nSeleccione una opción:")
