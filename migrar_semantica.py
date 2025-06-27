@@ -46,7 +46,7 @@ def cerrar_conexiones(conexion, pg_conn):
 
 def procesar_contactos():
     pg_schema = config('PG_SCHEMA_NAME', default='')
-    conexion, cursor, pg_conn, pg_cursor = get_database_connections()
+    conexion, cursor, pg_conn, pg_cursor = crear_conexiones()
     
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
@@ -125,14 +125,14 @@ def procesar_contactos():
         sys.exit(1)
         
     finally:
-        close_connections(conexion, pg_conn)             
+        cerrar_conexiones(conexion, pg_conn)             
 
 def procesar_movimientos():
     pg_schema = config('PG_SCHEMA_NAME', default='')
     conexion, cursor, pg_conn, pg_cursor = crear_conexiones()    
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
-        anio = 2020
+        anio = 2021
         batch_size = 1000
         offset = 0        
         cursor.execute(f"SELECT COUNT(*) AS total FROM fin_movimiento WHERE anio={anio}")

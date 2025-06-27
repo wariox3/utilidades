@@ -33,6 +33,7 @@ def main():
     }
     COMPRESS_SERVICE_URL = "http://boro.semantica.com.co/comprimir"
     DIRECTORIO_ALMACENAMIENTO=config('DIRECTORIO_ALMACENAMIENTO')
+    print(f"Directorio: {DIRECTORIO_ALMACENAMIENTO} Base de datos: {config('DATABASE_NAME')}")
     try:
         info = InMemoryAccountInfo()
         b2_api = B2Api(info)
