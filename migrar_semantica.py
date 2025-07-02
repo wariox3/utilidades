@@ -132,8 +132,8 @@ def procesar_movimientos():
     conexion, cursor, pg_conn, pg_cursor = crear_conexiones()    
     try:
         pg_cursor.execute(f"SET search_path TO {pg_schema}")
-        anio = 2021
-        batch_size = 1000
+        anio = 2022
+        batch_size = 10000
         offset = 0        
         cursor.execute(f"SELECT COUNT(*) AS total FROM fin_movimiento WHERE anio={anio}")
         result = cursor.fetchone()        
