@@ -127,12 +127,22 @@ def procesar_contactos():
     finally:
         cerrar_conexiones(conexion, pg_conn)             
 
-def procesar_movimientos():
+def solicitar_anio():
+    while True:
+        try:
+            anio = input("Ingrese el año a procesar (ej. 2022): ")
+            if not anio.isdigit() or len(anio) != 4:
+                print("Por favor ingrese un año válido de 4 dígitos.")
+                continue
+            return int(anio)
+        except ValueError:
+            print("Por favor ingrese un año válido (número de 4 dígitos).")
+
+def procesar_movimientos(anio):
     pg_schema = config('PG_SCHEMA_NAME', default='')
     conexion, cursor, pg_conn, pg_cursor = crear_conexiones()    
     try:
-        pg_cursor.execute(f"SET search_path TO {pg_schema}")
-        anio = 2022
+        pg_cursor.execute(f"SET search_path TO {pg_schema}")        
         batch_size = 10000
         offset = 0        
         cursor.execute(f"SELECT COUNT(*) AS total FROM fin_movimiento WHERE anio={anio}")
@@ -223,7 +233,8 @@ def mostrar_menu():
     if opcion == 'c':
         procesar_contactos()
     elif opcion == 'm':
-        procesar_movimientos()
+        anio = solicitar_anio()
+        procesar_movimientos(anio)                
     elif opcion == 's':
         print("Saliendo del programa...")
         sys.exit(0)
