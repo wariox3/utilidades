@@ -1,9 +1,12 @@
 from decouple import config
+from scp import SCPClient
 import mysql.connector
 import psycopg2
 import sys
 import traceback
 import re
+import paramiko
+import os
 
 def crear_conexiones():    
     postgres_parametros = {
@@ -53,6 +56,28 @@ def crear_tabla(pg_conn):
         )
         ''')
         pg_conn.commit()
+
+def descargar_archivo(archivo_log):
+    try:
+        host=config('SCP_HOST')
+        username=config('SCP_USER')
+        password=config('SCP_PASSWORD')
+        remote_path='/var/log/apache2/access.log'
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(host, username=username, password=password)
+                
+        with SCPClient(ssh.get_transport()) as scp:
+            scp.get(remote_path, archivo_log)
+            
+        print(f"Archivo descargado exitosamente a {archivo_log}")
+        return True
+    except Exception as e:
+        print(f"Error al descargar el archivo: {e}")
+        return False
+    finally:
+        if ssh:
+            ssh.close()
 
 def parse_log_line(line):
     try:
@@ -129,10 +154,10 @@ def insertar_log(pg_conn, logs_data):
         print(f"Error al insertar registro: {e}")
         raise
 
-def procesar_archivo(pg_conn, archivo_log='/home/desarrollo/Escritorio/access.log'):
+def procesar_archivo(pg_conn, archivo_log):
     try:
-        #crear_tabla(pg_conn) 
-        batch_size = 1000
+        #crear_tabla(pg_conn)         
+        batch_size = 10
         logs_data = []      
         with open(archivo_log, 'r') as f:
             for line in f:
@@ -156,14 +181,17 @@ def procesar_archivo(pg_conn, archivo_log='/home/desarrollo/Escritorio/access.lo
     
 if __name__ == "__main__":
     try:
+        archivo_log= '/home/desarrollo/Escritorio/access.log'
         pg_conn, pg_cursor = crear_conexiones()        
-        procesar_archivo(pg_conn)
+        descargar_archivo(archivo_log)        
+        procesar_archivo(pg_conn, archivo_log)
     except Exception as e:
         print(f"Error durante el procesamiento: {e}")
-        sys.exit(1)
-        
-    finally:
+        sys.exit(1)        
+    finally:        
         cerrar_conexiones(pg_conn)
+        if os.path.exists(archivo_log):
+            os.remove(archivo_log)
 
     
                 
