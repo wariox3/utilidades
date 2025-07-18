@@ -13,12 +13,11 @@ usuario = config('PG_DATABASE_USER')
 clave = quote(config('PG_DATABASE_CLAVE'))
 base_datos = config('PG_DATABASE_NAME')
 timestamp = datetime.datetime.now().strftime("%y%m%d%H%M")
-archivo_salida = f"/home/desarrollo/Escritorio/{base_datos}.sql"
+archivo_salida = f"/home/desarrollo/Escritorio/bditrio.sql"
 base_datos_backup = "bditriobackup"
 
-def exportar_base_datos():    
-    connection_string = f"postgresql://{usuario}:{clave}@{servidor}:{puerto}/{base_datos}"
-    
+def backup():    
+    connection_string = f"postgresql://{usuario}:{clave}@{servidor}:{puerto}/{base_datos}"    
     comando = [
         'pg_dump',
         '-d', connection_string,
@@ -52,7 +51,25 @@ def restaurar_backup():
     except subprocess.CalledProcessError as e:
         print(f"❌ Error al restaurar: {e}")
         return False
-    
+
+def backup_estandar():    
+    connection_string = f"postgresql://{usuario}:{clave}@{servidor}:{puerto}/{base_datos}"    
+    comando = [
+            'pg_dump',
+            '-d', connection_string,
+            '-f', archivo_salida,
+            '-Fc',  # Formato personalizado (binary)
+            '--no-owner',  # Excluye información de ownership
+            '-b',  # Incluye blobs grandes
+            '-v',  # Modo verbose
+        ]    
+
+    try:
+        subprocess.run(comando, check=True)
+        print(f"✅ Dump generado correctamente: {archivo_salida}")
+    except subprocess.CalledProcessError as e:
+        print("❌ Error al generar el dump:", e)
+
 def restaurar_backup_estandar():
 
     if not Path(archivo_salida).exists():
@@ -115,15 +132,18 @@ def mostrar_menu():
     print("\nSeleccione una opción:")
     print("b - backup")
     print("r - restaurar")
+    print("g - backup estandar")
     print("e - restaurar estandar")
     print("m - modificar dominio")
 
     print("s - Salir")    
     opcion = input("Opción: ").lower().strip()    
     if opcion == 'b':
-        exportar_base_datos()
+        backup()
     elif opcion == 'r':
         restaurar_backup()   
+    elif opcion == 'g':
+        backup_estandar()
     elif opcion == 'e':
         restaurar_backup_estandar()    
     elif opcion == 'm':
