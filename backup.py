@@ -100,12 +100,17 @@ def backup_schema():
         # Obtener lista de schemas (excluyendo system schemas)
         conn = psycopg2.connect(connection_string)
         cur = conn.cursor()
-        cur.execute("""
+        '''cur.execute("""
             SELECT schema_name 
             FROM information_schema.schemata 
             WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
             AND schema_name NOT LIKE 'pg_%' AND (schema_name = 'public' or schema_name = 'semantica');
-        """)
+        """)'''
+        cur.execute("""
+            SELECT schema_name 
+            FROM information_schema.schemata 
+            WHERE schema_name = 'semantica';
+        """)        
         schemas = [row[0] for row in cur.fetchall()]
         cur.close()
         conn.close()
@@ -143,7 +148,7 @@ def backup_schema():
         print(f"💥 Error general: {e}")
 
 def restaurar_backup_schema():
-    connection_string = f"postgresql://postgres:70143086@localhost:5432/bditriobackup"    
+    connection_string = f"postgresql://postgres:70143086@localhost:5432/bditrio"    
     try:
         backup_dir = "/home/desarrollo/Escritorio/backup"
         archivos_backup = [f for f in os.listdir(backup_dir) if f.endswith(".backup")]
