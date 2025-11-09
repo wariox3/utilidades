@@ -38,7 +38,7 @@ def cerrar_conexiones(pg_conn):
 def crear_tabla(pg_conn):
     with pg_conn.cursor() as cursor:
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS access_logs (
+        CREATE TABLE IF NOT EXISTS acceso (
             id SERIAL PRIMARY KEY,
             host TEXT,
             ip TEXT,
@@ -156,7 +156,7 @@ def insertar_log(pg_conn, logs_data):
 
 def procesar_archivo(pg_conn, archivo_log):
     try:
-        #crear_tabla(pg_conn)         
+        crear_tabla(pg_conn)         
         batch_size = 10
         logs_data = []      
         with open(archivo_log, 'r') as f:
