@@ -148,7 +148,7 @@ def backup_schema():
         print(f"💥 Error general: {e}")
 
 def restaurar_backup_schema():
-    connection_string = f"postgresql://postgres:70143086@localhost:5432/bditrio"    
+    connection_string = f"postgresql://postgres:70143086@localhost:5432/bditriobackup"    
     try:
         backup_dir = "/home/desarrollo/Escritorio/backup"
         archivos_backup = [f for f in os.listdir(backup_dir) if f.endswith(".backup")]

@@ -55,7 +55,17 @@ def crear_tabla(pg_conn):
             processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ip (
+            ip TEXT PRIMARY KEY,
+            nombre TEXT
+        )
+        ''')        
         pg_conn.commit()
+        cursor.execute('''
+        DELETE FROM acceso
+        ''')        
+        pg_conn.commit()        
 
 def descargar_archivo(archivo_log):
     try:
