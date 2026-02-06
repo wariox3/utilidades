@@ -93,24 +93,18 @@ def restaurar_backup_estandar():
         print(f"❌ Error al restaurar: {e}")
         return False    
 
-def backup_schema():
+def backup_schema(nombre_schema):
     connection_string = f"postgresql://{usuario}:{clave}@{servidor}:{puerto}/{base_datos}"
     
     try:
         # Obtener lista de schemas (excluyendo system schemas)
         conn = psycopg2.connect(connection_string)
         cur = conn.cursor()
-        '''cur.execute("""
-            SELECT schema_name 
-            FROM information_schema.schemata 
-            WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-            AND schema_name NOT LIKE 'pg_%' AND (schema_name = 'public' or schema_name = 'semantica');
-        """)'''
         cur.execute("""
             SELECT schema_name 
             FROM information_schema.schemata 
-            WHERE schema_name = 'semantica';
-        """)        
+            WHERE schema_name = %s;
+        """, (nombre_schema,))      
         schemas = [row[0] for row in cur.fetchall()]
         cur.close()
         conn.close()
@@ -259,7 +253,8 @@ def mostrar_menu():
     elif opcion == 'e':
         restaurar_backup_estandar()    
     elif opcion == 'k':
-        backup_schema()
+        nombre_schema = input("Ingrese el nombre del schema a respaldar: ").strip()
+        backup_schema(nombre_schema)        
     elif opcion == 't':
         restaurar_backup_schema()            
     elif opcion == 'm':

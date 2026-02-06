@@ -33,9 +33,8 @@ def listar_archivos(bucket_name):
                 print(f"El archivo {file_name} ha sido eliminado correctamente de Backblaze.")            
         except Exception as e:
             print(f"Error al descargar {file_name}: {e}")
-
-        print(f"Archivo guardado en: {ruta_destino}")
-        archivos_descargados += 1        
+        archivos_descargados += 1
+        print(f"{archivos_descargados} de {cantidad} Archivo guardado en: {ruta_destino}")                
         if archivos_descargados >= cantidad:
             break
 listar_archivos(config('B2_BUCKET_NAME'))
