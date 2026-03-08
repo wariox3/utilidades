@@ -39,14 +39,22 @@ def conectar(database):
         return None
 
 
-def obtener_sumas(cursor, tabla):
-
-    query = f"""
-        SELECT 
-            COALESCE(SUM(vr_debito),0),
-            COALESCE(SUM(vr_credito),0)
-        FROM {tabla}
-    """
+def obtener_sumas(cursor, tabla, tercero = False):
+    if tercero:
+        query = f"""
+            SELECT 
+                COALESCE(SUM(vr_debito),0),
+                COALESCE(SUM(vr_credito),0)
+            FROM {tabla}
+            WHERE codigo_tercero_fk IS NOT NULL
+        """
+    else:
+        query = f"""
+            SELECT 
+                COALESCE(SUM(vr_debito),0),
+                COALESCE(SUM(vr_credito),0)
+            FROM {tabla}
+        """
     cursor.execute(query)
     row = cursor.fetchone()
 
@@ -69,19 +77,32 @@ def auditar_base(nombre_bd):
         cursor = conn.cursor()
 
         # sumas
-        mov_debito, mov_credito = obtener_sumas(cursor, "fin_movimiento")
-        sal_debito, sal_credito = obtener_sumas(cursor, "fin_saldo_cuenta")
+        mov_debito, mov_credito = obtener_sumas(cursor, "fin_movimiento", False)
+        sal_debito, sal_credito = obtener_sumas(cursor, "fin_saldo_cuenta", False)
+        
+        mov_ter_debito, mov_ter_credito = obtener_sumas(cursor, "fin_movimiento", True)
+        sal_ter_debito, sal_ter_credito = obtener_sumas(cursor, "fin_saldo_tercero", True)
 
         # diferencias absolutas
         diff_debito = (mov_debito - sal_debito).copy_abs()
         diff_credito = (mov_credito - sal_credito).copy_abs()
+        diff_ter_debito = (mov_ter_debito - sal_ter_debito).copy_abs()
+        diff_ter_credito = (mov_ter_credito - sal_ter_credito).copy_abs()
 
         log(f"Movimiento   -> Debito: {mov_debito} | Credito: {mov_credito}")
         log(f"Saldo Cuenta -> Debito: {sal_debito} | Credito: {sal_credito}")
+        log(f"Movimiento Tercero   -> Debito: {mov_ter_debito} | Credito: {mov_ter_credito}")
+        log(f"Saldo Tercero       -> Debito: {sal_ter_debito} | Credito: {sal_ter_credito}")
 
         if diff_debito <= TOLERANCIA and diff_credito <= TOLERANCIA:
             log("RESULTADO: ✔ CUADRADO (dentro de tolerancia)")
-            return True
+            if diff_ter_debito <= TOLERANCIA and diff_ter_credito <= TOLERANCIA:
+                return True
+            else:
+                log("RESULTADO: ❌ DIFERENCIAS REALES EN TERCEROS")
+                log(f"Diferencia Debito Tercero : {diff_ter_debito}")
+                log(f"Diferencia Credito Tercero: {diff_ter_credito}")
+                return False
         else:
             log("RESULTADO: ❌ DIFERENCIAS REALES")
             log(f"Diferencia Debito : {diff_debito}")

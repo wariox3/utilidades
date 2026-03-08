@@ -1,0 +1,328 @@
+===============================================
+VALIDACION CONTABLE FIN_MOVIMIENTO vs FIN_SALDO_CUENTA
+Fecha ejecucion: 2026-03-07 19:51:06.381282
+===============================================
+
+========== bd1teg ==========
+Movimiento   -> Debito: 85637747041.39 | Credito: 85468315857.09
+Saldo Cuenta -> Debito: 85637747041.40 | Credito: 85468315857.10
+Movimiento Tercero   -> Debito: 85637747041.39 | Credito: 75746024618.29
+Saldo Tercero       -> Debito: 85637747041.40 | Credito: 75746024618.29
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdam ==========
+Movimiento   -> Debito: 0.00 | Credito: 0.00
+Saldo Cuenta -> Debito: 0.00 | Credito: 0.00
+Movimiento Tercero   -> Debito: 0.00 | Credito: 0.00
+Saldo Tercero       -> Debito: 0.00 | Credito: 0.00
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdancla ==========
+Movimiento   -> Debito: 10060739560.18 | Credito: 10060175280.18
+Saldo Cuenta -> Debito: 10060739560.18 | Credito: 10060175280.18
+Movimiento Tercero   -> Debito: 10060739560.18 | Credito: 10060113931.18
+Saldo Tercero       -> Debito: 10060739560.18 | Credito: 10060113931.18
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdastransportes ==========
+Movimiento   -> Debito: 0.00 | Credito: 0.00
+Saldo Cuenta -> Debito: 0.00 | Credito: 0.00
+Movimiento Tercero   -> Debito: 0.00 | Credito: 0.00
+Saldo Tercero       -> Debito: 0.00 | Credito: 0.00
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdatalaya ==========
+Movimiento   -> Debito: 5907707130.32 | Credito: 5907716754.32
+Saldo Cuenta -> Debito: 5907707130.32 | Credito: 5907716754.32
+Movimiento Tercero   -> Debito: 5907707130.32 | Credito: 5907716754.32
+Saldo Tercero       -> Debito: 5907707130.32 | Credito: 5907716754.32
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdatempi ==========
+Movimiento   -> Debito: 161053450762.90 | Credito: 161053450763.17
+Saldo Cuenta -> Debito: 161053450762.90 | Credito: 161053450763.16
+Movimiento Tercero   -> Debito: 110577961145.49 | Credito: 108504817040.85
+Saldo Tercero       -> Debito: 110577961145.49 | Credito: 108504817040.85
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdbyb ==========
+Movimiento   -> Debito: 183192732.87 | Credito: 184494266.87
+Saldo Cuenta -> Debito: 183192732.87 | Credito: 184494266.87
+Movimiento Tercero   -> Debito: 112714883.77 | Credito: 132958013.31
+Saldo Tercero       -> Debito: 112714883.77 | Credito: 132958013.31
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdcomereurovic ==========
+Movimiento   -> Debito: 21119063798.03 | Credito: 21119030835.89
+Saldo Cuenta -> Debito: 21119063798.03 | Credito: 21119030835.89
+Movimiento Tercero   -> Debito: 2353319339.34 | Credito: 2334772996.72
+Saldo Tercero       -> Debito: 2353319339.34 | Credito: 2334772996.72
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdcoomotor ==========
+Movimiento   -> Debito: 5365000.00 | Credito: 5365000.00
+Saldo Cuenta -> Debito: 5365000.00 | Credito: 5365000.00
+Movimiento Tercero   -> Debito: 3000000.00 | Credito: 5365000.00
+Saldo Tercero       -> Debito: 3000000.00 | Credito: 5365000.00
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdcoordinar ==========
+Movimiento   -> Debito: 510855886517.81 | Credito: 510855886515.31
+Saldo Cuenta -> Debito: 510855886518.01 | Credito: 510855886515.54
+Movimiento Tercero   -> Debito: 510855716235.81 | Credito: 510855886515.31
+Saldo Tercero       -> Debito: 510855716236.09 | Credito: 510855886515.62
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bddorchester ==========
+Movimiento   -> Debito: 159825876265.02 | Credito: 159789675486.02
+Saldo Cuenta -> Debito: 159825876265.08 | Credito: 159789675486.08
+Movimiento Tercero   -> Debito: 159825820165.02 | Credito: 141634587185.34
+Saldo Tercero       -> Debito: 159825820165.06 | Credito: 141634587185.39
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdenergy ==========
+Movimiento   -> Debito: 435779304230.13 | Credito: 439978035212.96
+Saldo Cuenta -> Debito: 435779304230.17 | Credito: 439978035213.01
+Movimiento Tercero   -> Debito: 326565267023.11 | Credito: 379935646977.14
+Saldo Tercero       -> Debito: 326565267023.13 | Credito: 379935646977.20
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdeurovic ==========
+Movimiento   -> Debito: 361682955479.40 | Credito: 361682914027.10
+Saldo Cuenta -> Debito: 361682955479.39 | Credito: 361682914027.09
+Movimiento Tercero   -> Debito: 267670815903.42 | Credito: 271989476779.81
+Saldo Tercero       -> Debito: 267670815903.43 | Credito: 271989476779.82
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdeurovicbogota ==========
+Movimiento   -> Debito: 462106922570.80 | Credito: 462105256124.97
+Saldo Cuenta -> Debito: 462106922570.81 | Credito: 462105256124.98
+Movimiento Tercero   -> Debito: 316884910285.61 | Credito: 335001678039.82
+Saldo Tercero       -> Debito: 316884910285.62 | Credito: 335001678039.82
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdeurovicmedellin ==========
+Movimiento   -> Debito: 25288967805.18 | Credito: 25288969305.14
+Saldo Cuenta -> Debito: 25288967805.18 | Credito: 25288969305.14
+Movimiento Tercero   -> Debito: 18965474447.73 | Credito: 18337912831.32
+Saldo Tercero       -> Debito: 18965474447.73 | Credito: 18337912831.32
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdforzakargo ==========
+Movimiento   -> Debito: 188345487848.40 | Credito: 188331377840.77
+Saldo Cuenta -> Debito: 188345487848.40 | Credito: 188331377840.77
+Movimiento Tercero   -> Debito: 149185309075.40 | Credito: 149716594370.06
+Saldo Tercero       -> Debito: 149185309075.40 | Credito: 149716594370.06
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdgalaxia ==========
+Movimiento   -> Debito: 564736957183.65 | Credito: 564736957182.66
+Saldo Cuenta -> Debito: 564736957183.67 | Credito: 564736957182.69
+Movimiento Tercero   -> Debito: 411745553039.77 | Credito: 410516838298.46
+Saldo Tercero       -> Debito: 411745553039.77 | Credito: 410516838298.47
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdgecko ==========
+Movimiento   -> Debito: 62704139642.56 | Credito: 62704139659.59
+Saldo Cuenta -> Debito: 62704139642.56 | Credito: 62704139659.59
+Movimiento Tercero   -> Debito: 50237360913.43 | Credito: 50274930211.05
+Saldo Tercero       -> Debito: 50237360913.43 | Credito: 50274930211.05
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdgyc ==========
+Movimiento   -> Debito: 535733736946.69 | Credito: 535627310421.69
+Saldo Cuenta -> Debito: 535733736946.65 | Credito: 535627310421.65
+Movimiento Tercero   -> Debito: 406440498151.75 | Credito: 437267383522.74
+Saldo Tercero       -> Debito: 406440498151.85 | Credito: 437267383522.84
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdincargo ==========
+Movimiento   -> Debito: 16426530339.27 | Credito: 16426970539.27
+Saldo Cuenta -> Debito: 16426530339.27 | Credito: 16426970539.27
+Movimiento Tercero   -> Debito: 12367135588.20 | Credito: 12180891509.75
+Saldo Tercero       -> Debito: 12367135588.20 | Credito: 12180891509.75
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdinsepsas ==========
+Movimiento   -> Debito: 124568299546.69 | Credito: 124568299546.29
+Saldo Cuenta -> Debito: 124568299546.70 | Credito: 124568299546.29
+Movimiento Tercero   -> Debito: 124568299546.69 | Credito: 124568299546.29
+Saldo Tercero       -> Debito: 124568299546.69 | Credito: 124568299546.29
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdintegral ==========
+Movimiento   -> Debito: 44094487302.84 | Credito: 44094487313.86
+Saldo Cuenta -> Debito: 44094487302.84 | Credito: 44094487313.87
+Movimiento Tercero   -> Debito: 41781655831.12 | Credito: 41782539997.51
+Saldo Tercero       -> Debito: 41781655831.12 | Credito: 41782539997.51
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdinvivo ==========
+Movimiento   -> Debito: 86699682877.02 | Credito: 86699901898.84
+Saldo Cuenta -> Debito: 86699682877.02 | Credito: 86699901898.84
+Movimiento Tercero   -> Debito: 86536771967.26 | Credito: 86548128414.08
+Saldo Tercero       -> Debito: 86536771967.25 | Credito: 86548128414.08
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdlogicuartas ==========
+Movimiento   -> Debito: 176974266394.50 | Credito: 177887450199.27
+Saldo Cuenta -> Debito: 176974266394.50 | Credito: 177887450199.27
+Movimiento Tercero   -> Debito: 141942004329.50 | Credito: 177680615374.11
+Saldo Tercero       -> Debito: 141942004329.50 | Credito: 177680615374.11
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdlogimag ==========
+Movimiento   -> Debito: 51821187957.32 | Credito: 51821187957.23
+Saldo Cuenta -> Debito: 51821187957.32 | Credito: 51821187957.23
+Movimiento Tercero   -> Debito: 41693273948.46 | Credito: 41678683672.89
+Saldo Tercero       -> Debito: 41693273948.46 | Credito: 41678683672.89
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdmaxsegur ==========
+Movimiento   -> Debito: 30611130476.59 | Credito: 30611130476.74
+Saldo Cuenta -> Debito: 30611130476.59 | Credito: 30611130476.74
+Movimiento Tercero   -> Debito: 23003046859.84 | Credito: 22791644007.92
+Saldo Tercero       -> Debito: 23003046859.84 | Credito: 22791644007.92
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdmeta ==========
+Movimiento   -> Debito: 0.00 | Credito: 0.00
+Saldo Cuenta -> Debito: 0.00 | Credito: 0.00
+Movimiento Tercero   -> Debito: 0.00 | Credito: 0.00
+Saldo Tercero       -> Debito: 0.00 | Credito: 0.00
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdmillaxpress ==========
+Movimiento   -> Debito: 20497708.57 | Credito: 20497708.57
+Saldo Cuenta -> Debito: 20497708.57 | Credito: 20497708.57
+Movimiento Tercero   -> Debito: 20497708.57 | Credito: 20497708.57
+Saldo Tercero       -> Debito: 20497708.57 | Credito: 20497708.57
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdmonarca ==========
+Movimiento   -> Debito: 243434875730.15 | Credito: 243434875730.57
+Saldo Cuenta -> Debito: 243434875730.16 | Credito: 243434875730.60
+Movimiento Tercero   -> Debito: 243434875730.15 | Credito: 243434875730.57
+Saldo Tercero       -> Debito: 243434875730.16 | Credito: 243434875730.59
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdnovasep ==========
+Movimiento   -> Debito: 651303613676.54 | Credito: 651303613677.90
+Saldo Cuenta -> Debito: 651303613676.65 | Credito: 651303613678.10
+Movimiento Tercero   -> Debito: 642420158412.96 | Credito: 642422424230.72
+Saldo Tercero       -> Debito: 642420158412.79 | Credito: 642422424231.00
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdpegaso ==========
+Movimiento   -> Debito: 0.00 | Credito: 0.00
+Saldo Cuenta -> Debito: 0.00 | Credito: 0.00
+Movimiento Tercero   -> Debito: 0.00 | Credito: 0.00
+Saldo Tercero       -> Debito: 0.00 | Credito: 0.00
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdsalgar ==========
+Movimiento   -> Debito: 53280225651.03 | Credito: 53283516709.03
+Saldo Cuenta -> Debito: 53280225651.03 | Credito: 53283516709.03
+Movimiento Tercero   -> Debito: 40718591968.03 | Credito: 36427901787.03
+Saldo Tercero       -> Debito: 40718591968.03 | Credito: 36427901787.03
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdsantandereana ==========
+Movimiento   -> Debito: 15772121998.53 | Credito: 15772121981.00
+Saldo Cuenta -> Debito: 15772121998.53 | Credito: 15772121981.00
+Movimiento Tercero   -> Debito: 15772121998.53 | Credito: 15772121981.00
+Saldo Tercero       -> Debito: 15772121998.53 | Credito: 15772121981.00
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdsecuricol ==========
+Movimiento   -> Debito: 121729313244.61 | Credito: 121729314398.61
+Saldo Cuenta -> Debito: 121729313244.61 | Credito: 121729314398.61
+Movimiento Tercero   -> Debito: 121729313244.61 | Credito: 121729314398.61
+Saldo Tercero       -> Debito: 121729313244.60 | Credito: 121729314398.60
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdsecuricolsas ==========
+Movimiento   -> Debito: 10078308501.23 | Credito: 10078308501.23
+Saldo Cuenta -> Debito: 10078308501.23 | Credito: 10078308501.23
+Movimiento Tercero   -> Debito: 10078308501.23 | Credito: 10078308501.23
+Saldo Tercero       -> Debito: 10078308501.23 | Credito: 10078308501.23
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdsedecol ==========
+Movimiento   -> Debito: 219965759003.89 | Credito: 219965790842.89
+Saldo Cuenta -> Debito: 219965759003.82 | Credito: 219965790842.82
+Movimiento Tercero   -> Debito: 219965759003.89 | Credito: 143335664325.34
+Saldo Tercero       -> Debito: 219965759003.82 | Credito: 143335664325.32
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdsegpais ==========
+Movimiento   -> Debito: 74072787624.13 | Credito: 74072787621.26
+Saldo Cuenta -> Debito: 74072787624.12 | Credito: 74072787621.25
+Movimiento Tercero   -> Debito: 61111816645.01 | Credito: 61947715333.66
+Saldo Tercero       -> Debito: 61111816645.00 | Credito: 61947715333.65
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdservies ==========
+Movimiento   -> Debito: 146752597490.51 | Credito: 146752597483.59
+Saldo Cuenta -> Debito: 146752597490.51 | Credito: 146752597483.59
+Movimiento Tercero   -> Debito: 146751270834.99 | Credito: 143461194641.03
+Saldo Tercero       -> Debito: 146751270835.01 | Credito: 143461194641.02
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdtempotrabajo ==========
+Movimiento   -> Debito: 0.00 | Credito: 0.00
+Saldo Cuenta -> Debito: 0.00 | Credito: 0.00
+Movimiento Tercero   -> Debito: 0.00 | Credito: 0.00
+Saldo Tercero       -> Debito: 0.00 | Credito: 0.00
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdveinticuatro ==========
+Movimiento   -> Debito: 980211626.36 | Credito: 980211626.36
+Saldo Cuenta -> Debito: 980211626.36 | Credito: 980211626.36
+Movimiento Tercero   -> Debito: 980211626.36 | Credito: 980211626.36
+Saldo Tercero       -> Debito: 980211626.36 | Credito: 980211626.36
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdveloenvios ==========
+Movimiento   -> Debito: 1317296451439.57 | Credito: 1317296451440.64
+Saldo Cuenta -> Debito: 1317296451439.58 | Credito: 1317296451440.64
+Movimiento Tercero   -> Debito: 1022390022161.94 | Credito: 1022302345020.45
+Saldo Tercero       -> Debito: 1022390022161.97 | Credito: 1022302345020.55
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdvidec ==========
+Movimiento   -> Debito: 121056814467.87 | Credito: 118121826837.72
+Saldo Cuenta -> Debito: 121056814467.86 | Credito: 118121826837.70
+Movimiento Tercero   -> Debito: 91091385312.65 | Credito: 89650266537.07
+Saldo Tercero       -> Debito: 91091385312.65 | Credito: 89650266537.08
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdvigilamos ==========
+Movimiento   -> Debito: 171527546651.36 | Credito: 171527546486.62
+Saldo Cuenta -> Debito: 171527546651.36 | Credito: 171527546486.61
+Movimiento Tercero   -> Debito: 171527546651.36 | Credito: 171527546486.62
+Saldo Tercero       -> Debito: 171527546651.40 | Credito: 171527546486.59
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdvimarco ==========
+Movimiento   -> Debito: 241149247832.46 | Credito: 241149247834.30
+Saldo Cuenta -> Debito: 241149247832.46 | Credito: 241149247834.30
+Movimiento Tercero   -> Debito: 241142594507.46 | Credito: 241148299338.30
+Saldo Tercero       -> Debito: 241142594507.46 | Credito: 241148299338.30
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+========== bdzima ==========
+Movimiento   -> Debito: 346401536636.00 | Credito: 346407532524.00
+Saldo Cuenta -> Debito: 346401536636.15 | Credito: 346407532524.15
+Movimiento Tercero   -> Debito: 346401469969.00 | Credito: 346407433694.00
+Saldo Tercero       -> Debito: 346401469969.18 | Credito: 346407433694.23
+RESULTADO: ✔ CUADRADO (dentro de tolerancia)
+
+================ RESUMEN ================
+Bases auditadas : 45
+Correctas       : 45
+Con diferencias : 0
+=========================================
+
+Archivo generado en:
+/home/desarrollo/proyectos/utilidades/proceso/resultado_validacion_saldos202603071951.txt
