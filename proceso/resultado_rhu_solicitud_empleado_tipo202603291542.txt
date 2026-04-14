@@ -1,0 +1,261 @@
+===============================================
+ANALISIS: rhu_solicitud_empleado_tipo
+Fecha ejecucion: 2026-03-29 15:42:05.493131
+===============================================
+
+========== bd1teg ==========
+  Registros     : 4
+  Nuevos únicos : 4
+  Duplicados PK : 0
+
+========== bdam ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdancla ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdastransportes ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdatalaya ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdatempi ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdbyb ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdcomereurovic ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdcoomotor ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdcoordinar ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bddorchester ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdenergy ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdeurovic ==========
+  Registros     : 14
+  Nuevos únicos : 10
+  Duplicados PK : 4
+
+========== bdeurovicbogota ==========
+  Registros     : 13
+  Nuevos únicos : 0
+  Duplicados PK : 13
+
+========== bdeurovicmedellin ==========
+  Registros     : 13
+  Nuevos únicos : 0
+  Duplicados PK : 13
+
+========== bdforzakargo ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdgalaxia ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdgecko ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdgyc ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdincargo ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdinsepsas ==========
+  Registros     : 5
+  Nuevos únicos : 1
+  Duplicados PK : 4
+
+========== bdintegral ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdinvivo ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdlogicuartas ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdlogimag ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdmaxsegur ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdmeta ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdmillaxpress ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdmonarca ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdnovasep ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdpegaso ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdsalgar ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdsantandereana ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdsecuricol ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdsecuricolsas ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdsedecol ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdsegpais ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdservies ==========
+  Registros     : 5
+  Nuevos únicos : 1
+  Duplicados PK : 4
+
+========== bdtempotrabajo ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdveinticuatro ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdveloenvios ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdvidec ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdvigilamos ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+========== bdvimarco ==========
+  Registros     : 5
+  Nuevos únicos : 0
+  Duplicados PK : 5
+
+========== bdzima ==========
+  Registros     : 4
+  Nuevos únicos : 0
+  Duplicados PK : 4
+
+
+================ REGISTROS ÚNICOS ================
+CODIGO       NOMBRE                                                                             PORTAL   BD ORIGEN
+-------------------------------------------------------------------------------------------------------------------
+5            Certificados Ingreso y Retención                                                   Sí       bdservies
+CES          CESANTÍAS                                                                          Sí       bd1teg
+CON JT       RETIRO JUSTA CAUSA                                                                 Sí       bdeurovic
+CRE          CREDITO POR LIBRANZA                                                               Sí       bdinsepsas
+DF           DIA DE LA FAMILIA                                                                  Sí       bdeurovic
+INCG         INCAPACIDADES                                                                      Sí       bdeurovic
+LIC          LICENCIA                                                                           Sí       bd1teg
+LR           LICENCIA REMUNERADA                                                                Sí       bdeurovic
+PER          PERMISO                                                                            Sí       bd1teg
+PNR          PERMISO NO REMUNERADO                                                              Sí       bdeurovic
+PROA         Programa Orientación y Atención Psicosocial al Empleado.                           Sí       bdeurovic
+RFM          RETIRO POR FALLECIMIENTO O MUERTE                                                  Sí       bdeurovic
+RV           RENUNCIA VOLUNTARIA                                                                Sí       bdeurovic
+RVT          RETIRO VOLUNTARIO                                                                  Sí       bdeurovic
+SIN JT       RETIRO SIN JUSTA CAUSA                                                             Sí       bdeurovic
+VAC          VACACIONES                                                                         Sí       bd1teg
+
+
+================ RESUMEN ================
+Bases analizadas        : 45
+Bases con tabla         : 45
+Bases sin tabla / error : 0
+Registros únicos        : 16
+=========================================
+
+Archivo generado en:
+/home/desarrollo/proyectos/utilidades/proceso/resultado_rhu_solicitud_empleado_tipo202603291542.txt
