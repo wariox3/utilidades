@@ -50,7 +50,7 @@ def limpiar_valor(valor, tipo='texto'):
 
 
 def insertar_rhu_pago_detalle():
-    ruta_excel = 'migracion/rhu_pago_detalle migración.xlsx'
+    ruta_excel = 'migracion/rhu_pago_detalle_migración_v2.xlsx'
     batch_size = 1000
 
     print(f"Leyendo archivo: {ruta_excel}")
