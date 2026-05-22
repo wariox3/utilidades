@@ -1,0 +1,14 @@
+===============================================
+EJECUCION DE QUERY EN MULTIPLES BASES
+Fecha ejecucion: 2026-05-22 07:53:12.158114
+Servidor: 143.198.36.9:27500
+Sentencia: DROP TABLE IF EXISTS fin_saldo;
+===============================================
+[FALLO] bd1teg -> 1142 (42000): DROP command denied to user 'soporte'@'206.62.143.241' for table 'fin_saldo'
+[FALLO] bdam -> 1142 (42000): DROP command denied to user 'soporte'@'206.62.143.241' for table 'fin_saldo'
+[FALLO] bdancla -> 1142 (42000): DROP command denied to user 'soporte'@'206.62.143.241' for table 'fin_saldo'
+[FALLO] bdastransportes -> 1142 (42000): DROP command denied to user 'soporte'@'206.62.143.241' for table 'fin_saldo'
+[FALLO] bdatalaya -> 1142 (42000): DROP command denied to user 'soporte'@'206.62.143.241' for table 'fin_saldo'
+[FALLO] bdatempi -> 1142 (42000): DROP command denied to user 'soporte'@'206.62.143.241' for table 'fin_saldo'
+[FALLO] bdbrand -> 1142 (42000): DROP command denied to user 'soporte'@'206.62.143.241' for table 'fin_saldo'
+[FALLO] bdbyb -> 1142 (42000): DROP command denied to user 'soporte'@'206.62.143.241' for table 'fin_saldo'

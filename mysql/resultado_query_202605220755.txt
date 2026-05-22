@@ -1,0 +1,63 @@
+===============================================
+EJECUCION DE QUERY EN MULTIPLES BASES
+Fecha ejecucion: 2026-05-22 07:55:15.511591
+Servidor: 143.198.36.9:27500
+Sentencia: DROP TABLE IF EXISTS fin_saldo;
+===============================================
+[OK]    bd1teg
+[OK]    bdam
+[OK]    bdancla
+[OK]    bdastransportes
+[OK]    bdatalaya
+[OK]    bdatempi
+[OK]    bdbrand
+[OK]    bdbyb
+[OK]    bdcomereurovic
+[OK]    bdcoomotor
+[OK]    bdcoordinar
+[OK]    bdcosmopolitn
+[OK]    bddorchester
+[OK]    bdenergy
+[OK]    bdeurovic
+[OK]    bdeurovicbogota
+[OK]    bdeurovicmedellin
+[OK]    bdforzakargo
+[OK]    bdgalaxia
+[OK]    bdgecko
+[OK]    bdgyc
+[OK]    bdimpecable
+[OK]    bdincargo
+[OK]    bdinsepsas
+[OK]    bdintegral
+[OK]    bdinvivo
+[OK]    bdjuvenil
+[OK]    bdlogicuartas
+[OK]    bdlogimag
+[OK]    bdmaxsegur
+[OK]    bdmeta
+[OK]    bdmillaxpress
+[OK]    bdmonarca
+[OK]    bdnovasep
+[OK]    bdpegaso
+[OK]    bdsalgar
+[OK]    bdsantandereana
+[OK]    bdsecuricol
+[OK]    bdsecuricolsas
+[OK]    bdsedecol
+[OK]    bdsegpais
+[OK]    bdseracis
+[OK]    bdservies
+[OK]    bdtempotrabajo
+[OK]    bdveinticuatro
+[OK]    bdveloenvios
+[OK]    bdvidec
+[OK]    bdvigilamos
+[OK]    bdvimarco
+[OK]    bdzima
+
+===============================================
+RESUMEN
+  Corrio OK en  : 50 bases
+  Fallo en      : 0 bases
+===============================================
+Detalle guardado en: /home/desarrollo/proyectos/utilidades/mysql/resultado_query_202605220755.txt
