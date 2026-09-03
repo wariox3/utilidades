@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# migracion_reddoc1_reddoc_2.sh
+# migrar.sh
 #
 # Migra los datos de un esquema de la base de origen (PG_ORIGEN) al esquema del
 # mismo nombre en la base de destino (PG_DESTINO), copiando todo lo que sea
@@ -8,21 +8,28 @@
 # solo las columnas comunes.
 #
 # Uso:
-#   ./migracion_reddoc1_reddoc_2.sh                 # migra el esquema semantica
-#   ./migracion_reddoc1_reddoc_2.sh -n              # simulacion: informe, no escribe
-#   ./migracion_reddoc1_reddoc_2.sh -s otro_esquema # otro esquema
-#   ./migracion_reddoc1_reddoc_2.sh -t gen_contacto # solo esa tabla (repetible)
-#   ./migracion_reddoc1_reddoc_2.sh -m reemplazar   # vacia las tablas destino antes
-#   ./migracion_reddoc1_reddoc_2.sh -F              # ignora las FK (mas datos, menos integridad)
-#   ./migracion_reddoc1_reddoc_2.sh -x              # sin rescate fila a fila
+#   ./migrar.sh                 # migra el esquema semantica
+#   ./migrar.sh -n              # ensayo: informe por tabla, no escribe
+#   ./migrar.sh -s otro_esquema # otro esquema
+#   ./migrar.sh -t gen_contacto # solo esa tabla (repetible)
+#   ./migrar.sh -m reemplazar   # vacia las tablas destino antes
+#   ./migrar.sh -F              # ignora las FK (mas datos, menos integridad)
+#   ./migrar.sh -x              # sin rescate fila a fila
 #
 # Modos (-m):
 #   completar  (por defecto) conserva lo que ya hay en destino e inserta lo que
 #              no colisione, con ON CONFLICT DO NOTHING.
 #   reemplazar vacia con TRUNCATE ... CASCADE las tablas a migrar y carga desde cero.
 #
+# Modelos ignorados (arreglo IGNORADAS, arriba en el script): catalogos que no
+# se migran nunca, salvo que se nombren de forma explicita con -t.
+#
 # Si la carga masiva de una tabla falla, se reintenta fila a fila para salvar
 # todo lo que sea insertable (desactivable con -x).
+#
+# Con -n la carga se ensaya de verdad en el destino, dentro de una transaccion
+# que se deshace con ROLLBACK al final: el informe dice tabla por tabla si
+# migra bien, si migra a medias o si falla, y por que.
 #
 # Variables requeridas en .env:
 #   PG_ORIGEN_DATABASE_HOST/USER/CLAVE/PORT/NAME
@@ -45,7 +52,45 @@ SIN_FK=0
 SIN_RESCATE=0
 TABLAS_PEDIDAS=()
 # Tablas de control de Django: migrarlas romperia el estado de migraciones.
-EXCLUIDAS="django_migrations django_content_type django_session"
+EXCLUIDAS=(django_migrations django_content_type django_session)
+# Modelos ignorados a proposito. gen_pais, gen_estado, gen_ciudad y
+# gen_identificacion son catalogos generales que el destino ya trae cargados y
+# cuyos ids ademas cambiaron de texto a bigint. gen_archivo cambio de forma en
+# reddoc2 (la referencia generica modelo/documento_id se normalizo en el par
+# modelo_id/objeto_id), asi que necesita una migracion propia.
+IGNORADAS=(gen_pais gen_estado gen_ciudad gen_identificacion gen_archivo)
+
+# Modelos que cambiaron de nombre entre las dos bases: tabla del origen ->
+# tabla del destino. A partir de aqui el script trabaja siempre con el nombre
+# del destino, y solo vuelve al del origen para leer los datos.
+declare -A EQUIVALENTES=(
+    # El id 1 choca: ADMINISTRATIVO en el origen y General en el destino son el
+    # mismo centro de costo, asi que el ON CONFLICT DO NOTHING conserva el del
+    # destino a proposito y solo entran los ids 2 y 3.
+    [con_grupo]=con_centro_costo
+)
+
+# Reglas por modelo: expresion SQL para las columnas que el origen no puede dar
+# tal cual. La clave es tabla.columna del destino y el valor una expresion
+# sobre la fila del origen, donde cada columna del origen se escribe o."columna"
+# y llega siempre como texto. Sirven para dos cosas:
+#   - convertir un valor cuyo tipo cambio entre las dos bases
+#   - rellenar una columna del destino que no existe en el origen
+# Las columnas del origen que use la expresion se traen solas, aunque no sean
+# comunes, y las tablas del esquema se pueden nombrar sin calificar.
+# Por ejemplo, para una columna que cambio de numeric(20,6) a bigint y para
+# otra que el destino exige y el origen no tiene:
+#   [gen_archivo.tamano]="o.\"tamano\"::numeric::bigint"
+#   [gen_archivo.modelo_id]="10002"
+declare -A REGLAS=(
+    # El rename de con_grupo a con_centro_costo se llevo consigo la columna que
+    # lo referencia: grupo_id paso a llamarse centro_costo_id.
+    [con_activo.centro_costo_id]="o.\"grupo_id\"::bigint"
+    [con_movimiento.centro_costo_id]="o.\"grupo_id\"::bigint"
+    [gen_sede.centro_costo_id]="o.\"grupo_id\"::bigint"
+    [gen_documento.centro_costo_id]="o.\"grupo_contabilidad_id\"::bigint"
+    [gen_documento_detalle.centro_costo_id]="o.\"grupo_id\"::bigint"
+)
 PG_BIN=""
 
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
@@ -60,7 +105,7 @@ aviso() { echo -e "⚠️  $*"; }
 error() { echo -e "❌ $*" >&2; }
 morir() { error "$*"; exit 1; }
 
-mostrar_ayuda() { sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
+mostrar_ayuda() { sed -n '3,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 
 leer_env() {
     local clave="$1" valor
@@ -151,14 +196,40 @@ ORDER BY c.relname, a.attnum;"
 psql_origen  -tAc "$SQL_COLUMNAS" > "$DIR_TMP/origen.txt"
 psql_destino -tAc "$SQL_COLUMNAS" > "$DIR_TMP/destino.txt"
 
+# El catalogo del origen pasa a hablar en nombres del destino, asi las tablas
+# renombradas quedan emparejadas como cualquier otra.
+EQUIVALENTES_USADAS=()
+for tabla_o in "${!EQUIVALENTES[@]}"; do
+    if grep -q "^${tabla_o}|" "$DIR_TMP/origen.txt"; then
+        EQUIVALENTES_USADAS+=("${tabla_o} -> ${EQUIVALENTES[$tabla_o]}")
+        sed -i "s/^${tabla_o}|/${EQUIVALENTES[$tabla_o]}|/" "$DIR_TMP/origen.txt"
+    fi
+done
+
 cut -d'|' -f1 "$DIR_TMP/origen.txt"  | sort -u > "$DIR_TMP/t_origen.txt"
 cut -d'|' -f1 "$DIR_TMP/destino.txt" | sort -u > "$DIR_TMP/t_destino.txt"
 comm -12 "$DIR_TMP/t_origen.txt" "$DIR_TMP/t_destino.txt" > "$DIR_TMP/t_comunes.txt"
 
-for excluida in $EXCLUIDAS; do
-    grep -vx "$excluida" "$DIR_TMP/t_comunes.txt" > "$DIR_TMP/t_tmp.txt" || true
+quitar_de_comunes() {
+    grep -vx "$1" "$DIR_TMP/t_comunes.txt" > "$DIR_TMP/t_tmp.txt" || true
     mv "$DIR_TMP/t_tmp.txt" "$DIR_TMP/t_comunes.txt"
+}
+
+for excluida in "${EXCLUIDAS[@]}"; do
+    quitar_de_comunes "$excluida"
 done
+
+# Los modelos ignorados solo se saltan cuando no se piden tablas con -t:
+# nombrar una tabla de forma explicita manda sobre la lista.
+IGNORADAS_APLICADAS=()
+if [ ${#TABLAS_PEDIDAS[@]} -eq 0 ]; then
+    for ignorada in "${IGNORADAS[@]}"; do
+        if grep -qx "$ignorada" "$DIR_TMP/t_comunes.txt"; then
+            IGNORADAS_APLICADAS+=("$ignorada")
+            quitar_de_comunes "$ignorada"
+        fi
+    done
+fi
 
 if [ ${#TABLAS_PEDIDAS[@]} -gt 0 ]; then
     printf '%s\n' "${TABLAS_PEDIDAS[@]}" | sort -u > "$DIR_TMP/t_pedidas.txt"
@@ -205,22 +276,236 @@ columnas_comunes() {
         $1==t && ($2 in o) { print $2 "|" $3 }' "$DIR_TMP/origen.txt" "$DIR_TMP/destino.txt"
 }
 
+# Nombre que tiene en el origen una tabla nombrada como en el destino.
+tabla_en_origen() {
+    local destino="$1" origen
+    for origen in "${!EQUIVALENTES[@]}"; do
+        if [ "${EQUIVALENTES[$origen]}" = "$destino" ]; then printf '%s' "$origen"; return; fi
+    done
+    printf '%s' "$destino"
+}
+
+# Verdadero si el catalogo de columnas indicado tiene esa tabla.columna.
+columna_existe_en() {
+    awk -F'|' -v t="$1" -v c="$2" '$1==t && $2==c { hallada=1 } END { exit !hallada }' "$3"
+}
+
+en_lista() {
+    local buscada="$1" elemento; shift
+    for elemento in "$@"; do [ "$elemento" = "$buscada" ] && return 0; done
+    return 1
+}
+
+# Prepara las listas de columnas que necesita el SQL de una tabla, ya con las
+# reglas del modelo aplicadas:
+#   COLS_COPIA    "a", "b"                 -> lo que se trae del origen
+#   COLS_TEXTO    "a" text, "b" text       -> las mismas, en la tabla temporal
+#   COLS_DESTINO  "a", "b"                 -> lo que recibe el INSERT
+#   EXPR_MASIVA   d."a"::int, <regla>      -> valores para la carga en bloque
+#   EXPR_FILA     r."a"::int, <regla>      -> los mismos, para el rescate
+# Los dos juegos de expresiones solo cambian en el alias porque el record del
+# bucle plpgsql (r) no puede llamarse igual que el alias de la tabla temporal.
+preparar_columnas() {
+    local tabla="$1" entrada nombre tipo clave columna extra
+    local -a orden=() copia=()
+    local -A expresion=()
+
+    mapfile -t DEFINICION < <(columnas_comunes "$tabla")
+    COLS_COPIA=""; COLS_TEXTO=""; COLS_DESTINO=""; EXPR_MASIVA=""; EXPR_FILA=""
+    NUM_COLS=0
+    [ ${#DEFINICION[@]} -gt 0 ] || return 0
+
+    for entrada in "${DEFINICION[@]}"; do
+        nombre="${entrada%%|*}"; tipo="${entrada#*|}"
+        copia+=("$nombre"); orden+=("$nombre")
+        expresion[$nombre]="o.\"${nombre}\"::${tipo}"
+    done
+
+    # Las reglas sustituyen la conversion por defecto o anaden una columna que
+    # el origen no tiene.
+    for clave in "${!REGLAS[@]}"; do
+        [ "${clave%%.*}" = "$tabla" ] || continue
+        columna="${clave#*.}"
+        columna_existe_en "$tabla" "$columna" "$DIR_TMP/destino.txt" \
+            || morir "Regla ${clave}: la columna no existe en el destino"
+        [ -n "${expresion[$columna]:-}" ] || orden+=("$columna")
+        expresion[$columna]="${REGLAS[$clave]}"
+    done
+
+    # Columnas del origen que usan las reglas y que no viajaban en el volcado.
+    for extra in $(printf '%s\n' "${expresion[@]}" | grep -oE 'o\."[^"]+"' | sed 's/^o\."//; s/"$//' | sort -u); do
+        en_lista "$extra" "${copia[@]}" && continue
+        columna_existe_en "$tabla" "$extra" "$DIR_TMP/origen.txt" \
+            || morir "Las reglas de ${tabla} usan o.\"${extra}\", que no existe en el origen"
+        copia+=("$extra")
+    done
+
+    for nombre in "${copia[@]}"; do
+        COLS_COPIA+="${COLS_COPIA:+, }\"${nombre}\""
+        COLS_TEXTO+="${COLS_TEXTO:+, }\"${nombre}\" text"
+    done
+    for nombre in "${orden[@]}"; do
+        COLS_DESTINO+="${COLS_DESTINO:+, }\"${nombre}\""
+        EXPR_MASIVA+="${EXPR_MASIVA:+, }${expresion[$nombre]//o.\"/d.\"}"
+        EXPR_FILA+="${EXPR_FILA:+, }${expresion[$nombre]//o.\"/r.\"}"
+    done
+    NUM_COLS=${#orden[@]}
+}
+
 # --------------------------------------------------------------- informe base
 
 echo "Origen : ${O_USER}@${O_HOST}:${O_PORT}/${O_NAME}  esquema ${ESQUEMA}"
 echo "Destino: ${D_USER}@${D_HOST}:${D_PORT}/${D_NAME}  esquema ${ESQUEMA}"
 echo "Modo   : ${MODO}$([ "$SIN_FK" -eq 1 ] && echo ' (sin comprobar FK)')"
 echo "Tablas : ${TOTAL_TABLAS} comunes de $(wc -l < "$DIR_TMP/t_origen.txt") en origen y $(wc -l < "$DIR_TMP/t_destino.txt") en destino"
+[ ${#IGNORADAS_APLICADAS[@]} -gt 0 ] && echo "Ignora : ${IGNORADAS_APLICADAS[*]}"
+[ ${#EQUIVALENTES_USADAS[@]} -gt 0 ] && echo "Renombra: ${EQUIVALENTES_USADAS[*]}"
 echo
 
 if [ "$SIMULACION" -eq 1 ]; then
-    printf "%-34s %8s %8s %8s\n" "TABLA" "COLS" "ORIGEN" "DESTINO"
+    # Ensayo real: se carga todo dentro de una unica transaccion en el destino y
+    # se deshace con ROLLBACK al final. Al ir en una sola transaccion y en el
+    # orden del plan, cada tabla ve las filas de sus padres y las FK se
+    # comprueban de verdad. SET CONSTRAINTS ALL IMMEDIATE fuerza la
+    # verificacion de las FK diferidas en el mismo punto en que la haria el
+    # COMMIT de la migracion real.
+    ARCHIVO_SQL="${DIR_TMP}/simulacion.sql"
+    ARCHIVO_RES="${DIR_TMP}/resultados.txt"
+
+    guardia=""
+    [ "$SIN_FK" -eq 1 ] && guardia="SET session_replication_role = replica;"
+
+    {
+        echo "SET client_min_messages = warning;"
+        echo "BEGIN;"
+        echo "SET search_path TO \"${ESQUEMA}\", public;"
+        [ -n "$guardia" ] && echo "$guardia"
+        echo "CREATE TEMP TABLE _sim (tabla text, insertadas bigint, estado text, motivo text);"
+    } > "$ARCHIVO_SQL"
+
+    declare -A SIM_COLS SIM_ORIGEN SIM_DESTINO SIM_INSERTADAS SIM_ESTADO SIM_MOTIVO
+    ensayadas=0
+
+    info "Ensayando la carga en el destino (todo se deshace al terminar)..."
+
     while read -r tabla; do
-        ncols=$(columnas_comunes "$tabla" | wc -l)
-        forigen=$(psql_origen  -tAc "select count(*) from \"${ESQUEMA}\".\"${tabla}\"")
-        fdestino=$(psql_destino -tAc "select count(*) from \"${ESQUEMA}\".\"${tabla}\"")
-        printf "%-34s %8s %8s %8s\n" "$tabla" "$ncols" "$forigen" "$fdestino"
+        preparar_columnas "$tabla"
+        [ -n "$COLS_COPIA" ] || continue
+
+        SIM_COLS[$tabla]=$NUM_COLS
+        SIM_DESTINO[$tabla]=$(psql_destino -tAc "select count(*) from \"${ESQUEMA}\".\"${tabla}\"")
+        SIM_INSERTADAS[$tabla]=0
+        SIM_MOTIVO[$tabla]=""
+
+        archivo="${DIR_TMP}/${tabla}.dat"
+        if ! psql_origen -q -c "\copy (SELECT ${COLS_COPIA} FROM \"${ESQUEMA}\".\"$(tabla_en_origen "$tabla")\") TO '${archivo}'" 2>>"$DIR_TMP/errores.txt"; then
+            SIM_ORIGEN[$tabla]="?"
+            SIM_ESTADO[$tabla]="lectura"
+            continue
+        fi
+
+        SIM_ORIGEN[$tabla]=$(wc -l < "$archivo")
+        if [ "${SIM_ORIGEN[$tabla]}" -eq 0 ]; then
+            SIM_ESTADO[$tabla]="vacia"
+            continue
+        fi
+
+        SIM_ESTADO[$tabla]="sin_ensayo"
+        ensayadas=$((ensayadas + 1))
+
+        cat >> "$ARCHIVO_SQL" <<SQL
+CREATE TEMP TABLE _dat (${COLS_TEXTO});
+\copy _dat (${COLS_COPIA}) FROM '${archivo}'
+DO \$sim\$
+DECLARE
+    r record; n bigint := 0; k bigint; motivo text := ''; resultado text := 'ok';
+BEGIN
+    BEGIN
+        INSERT INTO "${ESQUEMA}"."${tabla}" (${COLS_DESTINO})
+            SELECT ${EXPR_MASIVA} FROM _dat d ON CONFLICT DO NOTHING;
+        GET DIAGNOSTICS n = ROW_COUNT;
+        SET CONSTRAINTS ALL IMMEDIATE;
+        SET CONSTRAINTS ALL DEFERRED;
+    EXCEPTION WHEN others THEN
+        motivo := SQLERRM; n := 0; resultado := 'falla';
+SQL
+        if [ "$SIN_RESCATE" -eq 0 ]; then
+            cat >> "$ARCHIVO_SQL" <<SQL
+        BEGIN
+            FOR r IN SELECT * FROM _dat LOOP
+                BEGIN
+                    INSERT INTO "${ESQUEMA}"."${tabla}" (${COLS_DESTINO}) VALUES (${EXPR_FILA}) ON CONFLICT DO NOTHING;
+                    GET DIAGNOSTICS k = ROW_COUNT; n := n + k;
+                EXCEPTION WHEN others THEN NULL;
+                END;
+            END LOOP;
+            SET CONSTRAINTS ALL IMMEDIATE;
+            SET CONSTRAINTS ALL DEFERRED;
+            resultado := 'rescate';
+        EXCEPTION WHEN others THEN
+            motivo := SQLERRM; n := 0; resultado := 'falla';
+        END;
+SQL
+        fi
+        cat >> "$ARCHIVO_SQL" <<SQL
+    END;
+    INSERT INTO _sim VALUES ('${tabla}', n, resultado, motivo);
+END
+\$sim\$;
+DROP TABLE _dat;
+SQL
     done < "$DIR_TMP/plan.txt"
+
+    if [ "$ensayadas" -gt 0 ]; then
+        echo "\copy (SELECT tabla || '|' || insertadas || '|' || estado || '|' || replace(motivo, E'\n', ' ') FROM _sim) TO '${ARCHIVO_RES}'" >> "$ARCHIVO_SQL"
+    fi
+    echo "ROLLBACK;" >> "$ARCHIVO_SQL"
+
+    if psql_destino -q -f "$ARCHIVO_SQL" >>"$DIR_TMP/errores.txt" 2>&1 && [ -f "$ARCHIVO_RES" ]; then
+        while IFS='|' read -r t ins est mot; do
+            SIM_INSERTADAS[$t]="$ins"; SIM_ESTADO[$t]="$est"; SIM_MOTIVO[$t]="$mot"
+        done < "$ARCHIVO_RES"
+    elif [ "$ensayadas" -gt 0 ]; then
+        aviso "El ensayo se interrumpio; algunas tablas quedan sin diagnostico."
+    fi
+
+    echo
+    printf "%-34s %6s %10s %10s %12s  %s\n" "TABLA" "COLS" "ORIGEN" "DESTINO" "INSERTARIA" "RESULTADO"
+
+    bien=0; parciales=0; fallidas=0; vacias=0; total_insertadas=0
+    : > "$DIR_TMP/motivos.txt"
+
+    while read -r tabla; do
+        [ -n "${SIM_ESTADO[$tabla]:-}" ] || continue
+        motivo="${SIM_MOTIVO[$tabla]:-}"
+        insertadas="${SIM_INSERTADAS[$tabla]:-0}"
+        case "${SIM_ESTADO[$tabla]}" in
+            ok)      resultado="✅ migra bien";            bien=$((bien + 1)) ;;
+            rescate) resultado="⚠️  migra a medias (rescate fila a fila)"; parciales=$((parciales + 1)) ;;
+            falla)   resultado="❌ falla";                 fallidas=$((fallidas + 1)) ;;
+            vacia)   resultado="· vacia en origen";       vacias=$((vacias + 1)) ;;
+            lectura) resultado="❌ falla: no se pudo leer el origen"; fallidas=$((fallidas + 1)) ;;
+            *)       resultado="❓ sin diagnostico" ;;
+        esac
+        [ -n "$motivo" ] && echo "  ${tabla}: ${motivo}" >> "$DIR_TMP/motivos.txt"
+        total_insertadas=$((total_insertadas + insertadas))
+        printf "%-34s %6s %10s %10s %12s  %s\n" "$tabla" "${SIM_COLS[$tabla]}" \
+            "${SIM_ORIGEN[$tabla]}" "${SIM_DESTINO[$tabla]}" "$insertadas" "$resultado"
+    done < "$DIR_TMP/plan.txt"
+
+    echo
+    ok    "Tablas que migran bien: ${bien}"
+    [ "$parciales" -gt 0 ] && aviso "Tablas que migran a medias: ${parciales}"
+    [ "$vacias" -gt 0 ]    && info  "Tablas vacias en origen: ${vacias}"
+    [ "$fallidas" -gt 0 ]  && error "Tablas que fallan: ${fallidas}"
+    ok    "Filas que se insertarian: ${total_insertadas}"
+
+    if [ -s "$DIR_TMP/motivos.txt" ]; then
+        echo
+        echo "Motivos:"
+        cat "$DIR_TMP/motivos.txt"
+    fi
+
     echo
     aviso "Simulacion: no se escribio nada en el destino."
     exit 0
@@ -245,19 +530,11 @@ migradas=0; parciales=0; fallidas=0; vacias=0; total_insertadas=0
 printf "%-34s %8s %10s %10s  %s\n" "TABLA" "ORIGEN" "INSERTADAS" "OMITIDAS" "ESTADO"
 
 while read -r tabla; do
-    mapfile -t definicion < <(columnas_comunes "$tabla")
-    [ ${#definicion[@]} -gt 0 ] || continue
-
-    cols_lista=""; cols_texto=""; cols_cast=""
-    for entrada in "${definicion[@]}"; do
-        nombre="${entrada%%|*}"; tipo="${entrada#*|}"
-        cols_lista+="${cols_lista:+, }\"${nombre}\""
-        cols_texto+="${cols_texto:+, }\"${nombre}\" text"
-        cols_cast+="${cols_cast:+, }r.\"${nombre}\"::${tipo}"
-    done
+    preparar_columnas "$tabla"
+    [ -n "$COLS_COPIA" ] || continue
 
     archivo="${DIR_TMP}/${tabla}.dat"
-    if ! psql_origen -q -c "\copy (SELECT ${cols_lista} FROM \"${ESQUEMA}\".\"${tabla}\") TO '${archivo}'" 2>>"$DIR_TMP/errores.txt"; then
+    if ! psql_origen -q -c "\copy (SELECT ${COLS_COPIA} FROM \"${ESQUEMA}\".\"$(tabla_en_origen "$tabla")\") TO '${archivo}'" 2>>"$DIR_TMP/errores.txt"; then
         printf "%-34s %8s %10s %10s  %s\n" "$tabla" "?" "0" "-" "❌ error al leer origen"
         echo "[${tabla}] error al exportar del origen" >&3
         fallidas=$((fallidas + 1)); continue
@@ -271,15 +548,17 @@ while read -r tabla; do
 
     antes=$(psql_destino -tAc "select count(*) from \"${ESQUEMA}\".\"${tabla}\"")
 
-    # Carga masiva: tabla temporal con los tipos del destino y un unico INSERT.
+    # Carga masiva: los datos llegan como texto a una tabla temporal y cada
+    # columna se convierte con su expresion (la de la regla, si la tiene).
     guardia=""
     [ "$SIN_FK" -eq 1 ] && guardia="SET session_replication_role = replica;"
     if psql_destino -q >>"$DIR_TMP/errores.txt" 2>&1 <<SQL
 BEGIN;
+SET search_path TO "${ESQUEMA}", public;
 ${guardia}
-CREATE TEMP TABLE _mig AS SELECT ${cols_lista} FROM "${ESQUEMA}"."${tabla}" WITH NO DATA;
-\\copy _mig (${cols_lista}) FROM '${archivo}'
-INSERT INTO "${ESQUEMA}"."${tabla}" (${cols_lista}) SELECT ${cols_lista} FROM _mig ON CONFLICT DO NOTHING;
+CREATE TEMP TABLE _dat (${COLS_TEXTO});
+\\copy _dat (${COLS_COPIA}) FROM '${archivo}'
+INSERT INTO "${ESQUEMA}"."${tabla}" (${COLS_DESTINO}) SELECT ${EXPR_MASIVA} FROM _dat d ON CONFLICT DO NOTHING;
 COMMIT;
 SQL
     then
@@ -287,18 +566,19 @@ SQL
     elif [ "$SIN_RESCATE" -eq 1 ]; then
         estado="❌ fallo la carga"
     else
-        # Rescate: todo como texto y fila a fila, saltando las que no entran.
+        # Rescate: fila a fila, saltando las que no entran.
         if psql_destino -q >>"$DIR_TMP/errores.txt" 2>&1 <<SQL
 BEGIN;
+SET search_path TO "${ESQUEMA}", public;
 ${guardia}
-CREATE TEMP TABLE _mig_txt (${cols_texto});
-\\copy _mig_txt (${cols_lista}) FROM '${archivo}'
+CREATE TEMP TABLE _dat (${COLS_TEXTO});
+\\copy _dat (${COLS_COPIA}) FROM '${archivo}'
 DO \$rescate\$
 DECLARE r record;
 BEGIN
-    FOR r IN SELECT * FROM _mig_txt LOOP
+    FOR r IN SELECT * FROM _dat LOOP
         BEGIN
-            INSERT INTO "${ESQUEMA}"."${tabla}" (${cols_lista}) VALUES (${cols_cast}) ON CONFLICT DO NOTHING;
+            INSERT INTO "${ESQUEMA}"."${tabla}" (${COLS_DESTINO}) VALUES (${EXPR_FILA}) ON CONFLICT DO NOTHING;
         EXCEPTION WHEN others THEN NULL;
         END;
     END LOOP;
