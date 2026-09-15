@@ -1,0 +1,47 @@
+{
+    "emisor": 1,
+    "documento_tipo": 1,
+    "prefijo": "SETP",
+    "numero_resolucion": 18760000001,
+    "consecutivo": 990000000,
+    "fecha_emision": "2026-09-15",
+    "fecha_vencimiento":"2026-09-25",
+    "forma_pago": 2,
+    "medio_pago": 10,
+    "moneda": 35,
+    "adquiriente": {
+        "tipo_identificacion": 3,
+        "numero_identificacion": "70143086",
+        "razon_social": "Mario Andres Estrada Zuluaga",
+        "primer_nombre": "Mario",
+        "segundo_nombre": "Andres",
+        "primer_apellido": "Estrada",
+        "segundo_apellido": "Zuluaga",
+        "tipo_organizacion": 2,
+        "responsabilidades": [],
+        "pais": 46,
+        "departamento": 2,
+        "municipio": 1,
+        "direccion": "Calle 84 numero 84 50",
+        "telefono": "3205015059",
+        "correo": "maestradaz3@gmail.com",
+        "codigo_postal": "050001"
+    },
+    "detalles": [
+        {
+            "codigo_producto": "PRB001",
+            "numero_linea": 1,
+            "descripcion": "Servicio de prueba",
+            "unidad_medida": 70,
+            "cantidad": "1.00",
+            "descuento": "0.00",
+            "valor_unitario": "1000.00",
+            "valor_total": "1000.00",
+            "impuestos": [
+                {
+                    "tributo": 1, "base_gravable": "1000.00", "tarifa": "19.00", "valor": "190.00"
+                }
+            ]
+        }
+    ]
+}

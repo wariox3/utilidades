@@ -1,0 +1,65 @@
+===============================================
+ANALISIS DE SEGURIDAD NOBELIO https://api.rededoc.co
+Fecha ejecucion: 2026-09-15 12:40:31.776898
+===============================================
+Solo pruebas de lectura: no crea, modifica ni borra datos
+
+--- TLS y certificado ---
+[MEDIO] Acepta versiones TLS obsoletas: TLSv1.0, TLSv1.1
+        Versiones aceptadas: TLSv1.0, TLSv1.1, TLSv1.2, TLSv1.3
+        Recomendacion: Configurar TLS minimo 1.2 (en Cloudflare: SSL/TLS > Edge Certificates > Minimum TLS Version)
+[OK] SSL: api.rededoc.co vence el 2026-11-15 (61 dias) emisor Google Trust Services
+
+--- Cabeceras HTTP y redireccion ---
+[OK] HSTS: max-age=31536000; includeSubDomains; preload
+[OK] X-Content-Type-Options: nosniff
+[OK] X-Frame-Options: DENY
+[OK] Referrer-Policy: same-origin
+[OK] Server sin version: cloudflare
+[OK] HTTP redirige a HTTPS (301 https://api.rededoc.co/estado/)
+
+--- CORS ---
+[OK] No autoriza el origen ajeno https://origen-no-autorizado.example
+
+--- Autenticacion y metodos ---
+[OK] Sin credencial: rechazada con 401
+[OK] Llave invalida: rechazada con 401
+[OK] Llave valida enviada como Bearer: rechazada con 401
+[OK] Llave valida sin prefijo Api-Key: rechazada con 401
+[OK] OPTIONS sin credencial: rechazado con 401
+[OK] TRACE deshabilitado (405)
+
+--- Exposicion de rutas e informacion ---
+[OK] 10 de 10 rutas sensibles no accesibles
+[INFO] Documentacion publica sin credencial: /api/docs/, /api/schema/
+        Recomendacion: Confirmar que es intencional: describe todas las rutas y el formato de la llave
+[BAJO] Swagger UI se carga desde CDN sin version fija ni integrity (SRI)
+        Si el CDN se compromete, el script podria leer la llave que se escriba en 'Authorize'
+        Recomendacion: Servir Swagger UI localmente (drf-spectacular-sidecar) o fijar version con SRI
+[OK] Pagina 404 sin informacion de depuracion
+[OK] JSON invalido responde 400 sin traza
+
+--- Datos sensibles en respuestas autenticadas ---
+[OK] /api/emisores/emisor/ sin campos sensibles en la respuesta
+[OK] /api/emisores/certificado/ sin campos sensibles en la respuesta
+[MEDIO] /api/emisores/software/ devuelve el campo sensible 'pin' (longitud 5)
+        Recomendacion: Declararlo write_only en el serializer para que no se devuelva
+[OK] /api/emisores/resolucion/ sin campos sensibles en la respuesta
+[OK] /api/documentos/documento/ sin campos sensibles en la respuesta
+[OK] Detalle, PDF y XML de documentos exigen credencial
+[INFO] Limite de peticiones (429) no se prueba para no cargar produccion
+        Recomendacion: Probarlo en un ambiente de pruebas
+
+--- Configuracion local de este proyecto ---
+[BAJO] .env con permisos -rw-rw-r--: otros usuarios del equipo pueden leer la llave
+        Recomendacion: chmod 600 .env
+[OK] .env no esta versionado en git
+
+===============================================
+RESUMEN
+ALTO: 0
+MEDIO: 2
+BAJO: 2
+INFO: 2
+OK: 23
+===============================================

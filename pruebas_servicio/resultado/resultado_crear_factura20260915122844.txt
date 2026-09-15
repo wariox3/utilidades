@@ -1,0 +1,8 @@
+===============================================
+CREAR FACTURA NOBELIO https://api.rededoc.co
+Fecha ejecucion: 2026-09-15 12:28:44.639338
+===============================================
+Documento: SETP990000000 emisor 1 adquiriente 70143086
+[ERROR] POST https://api.rededoc.co/api/documentos/documento/ -> status 409 en 621ms: El documento SETP990000000 ya fue creado; su ruta va en la cabecera Location.
+        existente: /api/documentos/documento/aca927bf-81fe-4d1e-bb42-ff54c59fe2f3/
+        {"codigo": "documento_duplicado", "mensaje": "El documento SETP990000000 ya fue creado; su ruta va en la cabecera Location."}
