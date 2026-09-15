@@ -1,8 +1,0 @@
-===============================================
-CREAR FACTURA NOBELIO https://api.rededoc.co
-Fecha ejecucion: 2026-09-15 12:29:00.194022
-===============================================
-Documento: SETP990000001 emisor 1 adquiriente 70143086
-[OK] POST https://api.rededoc.co/api/documentos/documento/ -> status 201 en 659ms
-     id: 03d7e71f-2faa-4498-8c98-aa07539ea7c2
-     numero: SETP990000001
