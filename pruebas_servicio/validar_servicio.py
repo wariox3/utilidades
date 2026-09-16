@@ -1,14 +1,16 @@
+import csv
 import json
 import os
 import re
 import socket
 import ssl
 import stat
+import statistics
 import subprocess
 import sys
 import time
 import warnings
-from datetime import datetime
+from datetime import date, datetime
 from urllib.parse import urlparse
 
 import requests
@@ -33,6 +35,17 @@ RUTA_ESTADO = "/estado/"
 RUTA_CREDENCIAL = "/api/emisores/emisor/"
 # crea el documento en borrador (no firma ni envia a la DIAN)
 RUTA_DOCUMENTO = "/api/documentos/documento/"
+
+# tiempos de la factura: crear un documento cuesta mas que un GET, tiene su propio tope
+TIEMPO_MAXIMO_FACTURA_MS = config('NOBELIO_TIEMPO_MAXIMO_FACTURA_MS', default=5000, cast=int)
+# historico de emisiones, para comparar cada factura contra las anteriores
+ARCHIVO_TIEMPOS_FACTURA = os.path.join(DIRECTORIO_RESULTADO, "tiempos_factura.csv")
+CAMPOS_TIEMPOS_FACTURA = ["fecha", "numero", "status", "servidor_ms", "total_ms"]
+# emisiones correctas previas que se usan como referencia
+MUESTRA_TIEMPOS = 20
+MINIMO_MUESTRA = 5
+# una factura mas lenta que este factor sobre la mediana indica degradacion
+FACTOR_DEGRADACION = 2.0
 
 # analisis de seguridad (solo pruebas de lectura)
 RUTA_DOCS = "/api/docs/"
@@ -70,6 +83,30 @@ CAMPO_SENSIBLE = re.compile(
     re.I
 )
 MARCAS_DEBUG = ("Traceback", "DEBUG = True", "Using the URLconf", "Request Method:")
+
+# barrido de autenticacion: id que no existe, para que una escritura que se
+# cuele por un fallo de credencial no alcance a tocar un registro real
+ID_PRUEBA = "99999999"
+METODOS_SCHEMA = ("GET", "POST", "PUT", "PATCH", "DELETE")
+PAUSA_BARRIDO = 0.15
+
+# --- Limite de peticiones ---------------------------------------------------
+# Topes que declara el servicio en DEFAULT_THROTTLE_RATES. Se leen del .env
+# para no quedar desfasados si alla los cambian con THROTTLE_USUARIO/ANONIMO.
+TOPE_USUARIO = config('NOBELIO_TOPE_USUARIO', default=300, cast=int)
+TOPE_ANONIMO = config('NOBELIO_TOPE_ANONIMO', default=30, cast=int)
+# cuanto seguir insistiendo por encima del tope antes de rendirse
+MARGEN_TOPE = 20
+PAUSA_TOPE = 0.05
+VENTANA_SEGUNDOS = 3600
+# la ruta autenticada mas barata: un solo registro de catalogo
+RUTA_BARATA = "/api/catalogos/tipo-factura/1/"
+# /api/docs/ es AllowAny y no declara throttle_scope, asi que es donde actua
+# el tope anonimo. Se pide como html: un 406 se cortaria en la negociacion de
+# contenido, que va antes del throttle, y no contaria para el tope.
+RUTA_ANONIMA = RUTA_DOCS
+CABECERA_HTML = {"Accept": "text/html"}
+IP_FALSA = "203.0.113.77"
 
 # manejador global del archivo
 log_file = None
@@ -139,6 +176,19 @@ def asignar_consecutivo(documento):
 
     documento["consecutivo"] = consecutivo
     return consecutivo
+
+
+def actualizar_fechas(documento):
+    """
+    Pone la fecha actual como fecha de emision. El vencimiento se corre igual,
+    conservando el plazo en dias que trae el json.
+    """
+    hoy = date.today()
+    emision = date.fromisoformat(documento["fecha_emision"])
+    documento["fecha_emision"] = hoy.isoformat()
+    if documento.get("fecha_vencimiento"):
+        plazo = date.fromisoformat(documento["fecha_vencimiento"]) - emision
+        documento["fecha_vencimiento"] = (hoy + plazo).isoformat()
 
 
 def construir_headers():
@@ -245,9 +295,81 @@ def estado():
     cerrar_log()
 
 
+def leer_tiempos_factura():
+    """
+    Tiempos totales (ms) de las ultimas emisiones correctas del historico
+    """
+    if not os.path.exists(ARCHIVO_TIEMPOS_FACTURA):
+        return []
+    with open(ARCHIVO_TIEMPOS_FACTURA, "r", encoding="utf-8", newline="") as f:
+        tiempos = [int(fila["total_ms"]) for fila in csv.DictReader(f) if fila["status"] == "201"]
+    return tiempos[-MUESTRA_TIEMPOS:]
+
+
+def guardar_tiempo_factura(numero, status, servidor_ms, total_ms):
+    os.makedirs(DIRECTORIO_RESULTADO, exist_ok=True)
+    nuevo = not os.path.exists(ARCHIVO_TIEMPOS_FACTURA)
+    with open(ARCHIVO_TIEMPOS_FACTURA, "a", encoding="utf-8", newline="") as f:
+        escritor = csv.DictWriter(f, fieldnames=CAMPOS_TIEMPOS_FACTURA)
+        if nuevo:
+            escritor.writeheader()
+        escritor.writerow({
+            "fecha": datetime.now().isoformat(timespec="seconds"),
+            "numero": numero,
+            "status": status,
+            "servidor_ms": servidor_ms,
+            "total_ms": total_ms,
+        })
+
+
+def percentil(valores, porcentaje):
+    ordenados = sorted(valores)
+    indice = max(0, int(round(porcentaje / 100 * len(ordenados))) - 1)
+    return ordenados[indice]
+
+
+def validar_tiempo_factura(status, servidor_ms, total_ms, anteriores):
+    """
+    Valida el tiempo de la emision contra el tope y contra el historico.
+    Devuelve la lista de problemas encontrados.
+    """
+    problemas = []
+    log("")
+    log("--- Tiempo de atencion ---")
+    log(f"Servidor (hasta cabeceras): {servidor_ms}ms")
+    log(f"Total (con descarga):       {total_ms}ms")
+    log(f"Tope:                       {TIEMPO_MAXIMO_FACTURA_MS}ms")
+
+    if total_ms > TIEMPO_MAXIMO_FACTURA_MS:
+        problemas.append(f"tiempo {total_ms}ms supera el tope de {TIEMPO_MAXIMO_FACTURA_MS}ms")
+    elif total_ms > TIEMPO_MAXIMO_FACTURA_MS * 0.8:
+        log(f"[AVISO] tiempo {total_ms}ms por encima del 80% del tope")
+
+    # un rechazo (400/401/429) se responde sin procesar la factura, no es comparable
+    if status != 201:
+        return problemas
+
+    if len(anteriores) < MINIMO_MUESTRA:
+        log(f"Historico: {len(anteriores)} emisiones correctas, se necesitan {MINIMO_MUESTRA} para comparar")
+        return problemas
+
+    mediana = statistics.median(anteriores)
+    log(f"Historico ultimas {len(anteriores)} emisiones correctas:")
+    log(f"     minimo {min(anteriores)}ms, mediana {int(mediana)}ms, "
+        f"p95 {percentil(anteriores, 95)}ms, maximo {max(anteriores)}ms")
+    variacion = (total_ms - mediana) / mediana * 100 if mediana else 0
+    log(f"     esta emision: {variacion:+.0f}% frente a la mediana")
+
+    if mediana and total_ms > mediana * FACTOR_DEGRADACION:
+        problemas.append(f"tiempo {total_ms}ms es mas de {FACTOR_DEGRADACION:g} veces la mediana "
+                         f"({int(mediana)}ms): posible degradacion del servicio")
+    return problemas
+
+
 def crear_factura():
     try:
         documento = cargar_json("factura.json")
+        actualizar_fechas(documento)
         asignar_consecutivo(documento)
     except Exception as e:
         print(f"No se pudo preparar documento/factura.json: {e}")
@@ -257,6 +379,8 @@ def crear_factura():
     numero = f"{documento.get('prefijo', '')}{documento.get('consecutivo', '')}"
     url = f"{BASE_NOBELIO}{RUTA_DOCUMENTO}"
     log(f"Documento: {numero} emisor {documento.get('emisor')} adquiriente {documento.get('adquiriente', {}).get('numero_identificacion')}")
+    log(f"Fechas: emision {documento['fecha_emision']} vencimiento {documento.get('fecha_vencimiento')}")
+    anteriores = leer_tiempos_factura()
 
     try:
         inicio = time.perf_counter()
@@ -264,12 +388,16 @@ def crear_factura():
         tiempo_ms = int((time.perf_counter() - inicio) * 1000)
     except requests.exceptions.Timeout:
         log(f"[ERROR] POST {url} sin respuesta en {TIMEOUT_SEGUNDOS}s")
+        guardar_tiempo_factura(numero, "timeout", "", TIMEOUT_SEGUNDOS * 1000)
         cerrar_log()
         return
     except Exception as e:
         log(f"[ERROR] POST {url} fallo la peticion: {e}")
         cerrar_log()
         return
+
+    servidor_ms = int(response.elapsed.total_seconds() * 1000)
+    guardar_tiempo_factura(numero, response.status_code, servidor_ms, tiempo_ms)
 
     try:
         cuerpo = response.json()
@@ -290,6 +418,12 @@ def crear_factura():
     else:
         log(f"[ERROR] POST {url} -> status {response.status_code} en {tiempo_ms}ms")
         log(f"        respuesta: {response.text[:300]}")
+
+    problemas = validar_tiempo_factura(response.status_code, servidor_ms, tiempo_ms, anteriores)
+    for problema in problemas:
+        log(f"[ERROR] {problema}")
+    if not problemas:
+        log("[OK] Tiempo de atencion dentro de lo esperado")
 
     cerrar_log()
 
@@ -469,6 +603,84 @@ def seguridad_autenticacion():
             hallazgo("OK", f"TRACE deshabilitado ({r.status_code})")
 
 
+def operaciones_schema():
+    """
+    Baja el schema publico y entrega (metodo, ruta, plantilla) de cada
+    operacion, con los parametros de ruta reemplazados por un id inexistente
+    """
+    r = peticion("GET", RUTA_SCHEMA)
+    if r is None or r.status_code != 200:
+        return []
+    try:
+        rutas = r.json()["paths"]
+    except (ValueError, KeyError):
+        return []
+
+    operaciones = []
+    for plantilla, metodos in sorted(rutas.items()):
+        ruta = re.sub(r"\{[^}]+\}", ID_PRUEBA, plantilla)
+        for metodo in metodos:
+            if metodo.upper() in METODOS_SCHEMA:
+                operaciones.append((metodo.upper(), ruta, plantilla))
+    return operaciones
+
+
+def seguridad_barrido_autenticacion():
+    """
+    Pide sin credencial cada operacion que documenta el schema: todas deben
+    responder 401. Desde que los catalogos exigen llave no hay excepciones,
+    asi que cualquier otra respuesta es un hallazgo.
+
+    Las escrituras van contra un id inexistente y con cuerpo vacio: si la
+    credencial no se exigiera, lo peor que puede pasar es un 404 o un 400.
+    """
+    seccion("Barrido de autenticacion (todas las rutas del schema)")
+    operaciones = operaciones_schema()
+    if not operaciones:
+        hallazgo("INFO", "No se pudo leer el schema, se omite el barrido",
+                 recomendacion=f"Revisar que {RUTA_SCHEMA} responda 200")
+        return
+
+    abiertas, procesan_cuerpo, otras, frenadas = [], [], [], []
+    for metodo, ruta, plantilla in operaciones:
+        cuerpo = {"json": {}} if metodo in ("POST", "PUT", "PATCH") else {}
+        r = peticion(metodo, ruta, allow_redirects=False, **cuerpo)
+        if r is None:
+            continue
+        if r.status_code in (401, 403):
+            pass
+        elif r.status_code == 429:
+            frenadas.append(f"{metodo} {plantilla}")
+        elif r.status_code in (200, 201, 204):
+            abiertas.append(f"{metodo} {plantilla} ({r.status_code})")
+        elif r.status_code == 400:
+            procesan_cuerpo.append(f"{metodo} {plantilla}")
+        else:
+            otras.append(f"{metodo} {plantilla} ({r.status_code})")
+        time.sleep(PAUSA_BARRIDO)
+
+    if abiertas:
+        hallazgo("ALTO", f"{len(abiertas)} operaciones responden sin credencial",
+                 ", ".join(abiertas[:10]),
+                 "Exigir la llave en todas las rutas documentadas")
+    if procesan_cuerpo:
+        hallazgo("MEDIO", f"{len(procesan_cuerpo)} operaciones validan el cuerpo antes de exigir credencial",
+                 ", ".join(procesan_cuerpo[:10]),
+                 "Comprobar la llave antes de procesar el cuerpo de la peticion")
+    if otras:
+        hallazgo("BAJO", f"{len(otras)} operaciones no responden 401 sin credencial",
+                 ", ".join(otras[:10]),
+                 "Exigir la credencial antes de resolver la ruta")
+    if frenadas:
+        hallazgo("INFO", f"{len(frenadas)} operaciones respondieron 429 (limite de peticiones)",
+                 "El barrido no concluye sobre ellas", "Repetir el barrido mas tarde")
+
+    total = len(operaciones)
+    correctas = total - len(abiertas) - len(procesan_cuerpo) - len(otras) - len(frenadas)
+    hallazgo("OK" if correctas == total else "INFO",
+             f"{correctas} de {total} operaciones del schema exigen credencial")
+
+
 def seguridad_exposicion():
     seccion("Exposicion de rutas e informacion")
     protegidas = 0
@@ -595,9 +807,146 @@ def analisis_seguridad():
     seguridad_cabeceras()
     seguridad_cors()
     seguridad_autenticacion()
+    seguridad_barrido_autenticacion()
     seguridad_exposicion()
     seguridad_datos()
     seguridad_local()
+
+    log("")
+    log("===============================================")
+    log("RESUMEN")
+    for nivel in NIVELES:
+        log(f"{nivel}: {hallazgos.count(nivel)}")
+    log("===============================================")
+    cerrar_log()
+
+
+def agotar_tope(ruta, con_llave, tope, headers=None):
+    """
+    Pide la misma ruta hasta el primer 429 o hasta pasarse del tope.
+    Devuelve (aceptadas, respuesta_429 o None, segundos).
+    """
+    maximo = tope + MARGEN_TOPE
+    inicio = time.perf_counter()
+    for numero in range(1, maximo + 1):
+        r = peticion("GET", ruta, con_llave=con_llave, headers=headers)
+        if r is None:
+            return numero - 1, None, time.perf_counter() - inicio
+        if r.status_code == 429:
+            return numero - 1, r, time.perf_counter() - inicio
+        time.sleep(PAUSA_TOPE)
+    return maximo, None, time.perf_counter() - inicio
+
+
+def revisar_retry_after(r, nombre):
+    """
+    El 429 debe decir cuanto esperar, y ese valor debe caber en la ventana
+    """
+    espera = r.headers.get("Retry-After")
+    if espera is None:
+        hallazgo("MEDIO", f"{nombre}: el 429 no trae cabecera Retry-After",
+                 recomendacion="Enviar Retry-After para que el cliente sepa cuando reintentar")
+        return
+    try:
+        segundos = int(espera)
+    except ValueError:
+        hallazgo("BAJO", f"{nombre}: Retry-After no es un numero de segundos: {espera}")
+        return
+    if 0 < segundos <= VENTANA_SEGUNDOS:
+        hallazgo("OK", f"{nombre}: Retry-After {segundos}s (quedan {segundos // 60} min de ventana)")
+    else:
+        hallazgo("BAJO", f"{nombre}: Retry-After fuera de la ventana esperada: {segundos}s",
+                 f"La ventana configurada es de {VENTANA_SEGUNDOS}s")
+
+
+def comparar_tope(nombre, aceptadas, tope, r429):
+    """
+    Compara lo medido con lo configurado. Por debajo del tope no es un fallo:
+    la ventana es deslizante y el trafico previo de la hora ya gasto parte.
+    """
+    if r429 is None:
+        hallazgo("ALTO", f"{nombre}: no aparecio el 429 tras {aceptadas} peticiones",
+                 f"El tope configurado seria {tope}",
+                 "Revisar que el throttle este activo y que la cache sea compartida")
+        return
+    if aceptadas > tope:
+        hallazgo("MEDIO", f"{nombre}: acepto {aceptadas} peticiones, por encima del tope {tope}",
+                 "Con varios workers y cache por proceso el tope se multiplica",
+                 "Confirmar que CACHE_URL apunta a la cache compartida (dbcache)")
+    else:
+        gastado = tope - aceptadas
+        detalle = f"tope {tope}" if not gastado else f"tope {tope}, {gastado} ya gastadas en la ventana"
+        hallazgo("OK", f"{nombre}: corto en la peticion {aceptadas + 1} ({detalle})")
+
+
+def limite_peticiones():
+    """
+    Mide los dos topes del servicio y comprueba que no se puedan burlar.
+
+    Gasta cuota a proposito: al terminar, la llave y esta IP quedan en 429
+    hasta que pase la ventana. Por eso es una opcion aparte del menu y no
+    forma parte del analisis de seguridad.
+    """
+    hallazgos.clear()
+    abrir_log("limite_peticiones", "VALIDACION LIMITE DE PETICIONES")
+    log(f"Topes esperados: {TOPE_USUARIO}/hora por credencial, {TOPE_ANONIMO}/hora anonimo")
+    log("La prueba agota los dos: la llave y esta IP quedaran en 429 un rato")
+
+    # 1. DRF comprueba permisos antes que el throttle, asi que un 401 corta
+    # antes de contar. Se mide primero porque si contara, gastaria el cupo
+    # anonimo que necesita el paso 2.
+    seccion("Peticiones rechazadas sin credencial")
+    intentos = TOPE_ANONIMO + 10
+    rechazos = frenadas = 0
+    for _ in range(intentos):
+        r = peticion("GET", RUTA_CREDENCIAL)
+        if r is None:
+            break
+        if r.status_code == 429:
+            frenadas += 1
+            break
+        if r.status_code in (401, 403):
+            rechazos += 1
+        time.sleep(PAUSA_TOPE)
+
+    if frenadas:
+        hallazgo("OK", f"Las peticiones sin credencial se cuentan: 429 tras {rechazos} rechazos")
+    else:
+        hallazgo("BAJO", f"{rechazos} peticiones sin credencial rechazadas sin gastar cuota",
+                 "El permiso se comprueba antes que el tope, asi que un 401 no cuenta: "
+                 "una ruta protegida se puede sondear sin limite",
+                 "Contar tambien lo rechazado, o frenarlo en el borde (Cloudflare)")
+
+    # 2. Tope anonimo, donde la vista no declara throttle_scope
+    seccion(f"Tope anonimo ({TOPE_ANONIMO}/hora)")
+    aceptadas, r429, segundos = agotar_tope(RUTA_ANONIMA, False, TOPE_ANONIMO, CABECERA_HTML)
+    log(f"{aceptadas} peticiones aceptadas en {segundos:.1f}s contra {RUTA_ANONIMA}")
+    comparar_tope("Anonimo", aceptadas, TOPE_ANONIMO, r429)
+
+    # 3. Con el cupo anonimo agotado, ver si una IP falsa lo reinicia. Si pasa,
+    # el tope por IP se burla cambiando de cabecera en cada peticion.
+    if r429 is not None:
+        revisar_retry_after(r429, "Anonimo")
+        seccion("Suplantacion de IP con X-Forwarded-For")
+        cabeceras = dict(CABECERA_HTML, **{"X-Forwarded-For": IP_FALSA})
+        r = peticion("GET", RUTA_ANONIMA, headers=cabeceras)
+        if r is None:
+            pass
+        elif r.status_code == 429:
+            hallazgo("OK", "X-Forwarded-For falso no reinicia el contador (NUM_PROXIES correcto)")
+        else:
+            hallazgo("ALTO", f"X-Forwarded-For falso salta el tope anonimo (status {r.status_code})",
+                     "Cambiando la cabecera en cada peticion el tope por IP no frena nada",
+                     "Ajustar NUM_PROXIES al numero real de proxies delante")
+
+    # 4. Tope por credencial. Va de ultimo: es el mas caro y el que deja la
+    # llave sin servicio hasta que pase la ventana.
+    seccion(f"Tope por credencial ({TOPE_USUARIO}/hora)")
+    aceptadas, r429, segundos = agotar_tope(RUTA_BARATA, True, TOPE_USUARIO)
+    log(f"{aceptadas} peticiones aceptadas en {segundos:.1f}s contra {RUTA_BARATA}")
+    comparar_tope("Credencial", aceptadas, TOPE_USUARIO, r429)
+    if r429 is not None:
+        revisar_retry_after(r429, "Credencial")
 
     log("")
     log("===============================================")
@@ -614,6 +963,7 @@ def mostrar_menu():
         print("e - estado")
         print("f - crear factura")
         print("a - analisis de seguridad")
+        print("l - limite de peticiones (agota la cuota de la llave)")
         print("s - Salir")
         opcion = input("Opción: ").lower().strip()
         if opcion == 'e':
@@ -622,6 +972,8 @@ def mostrar_menu():
             crear_factura()
         elif opcion == 'a':
             analisis_seguridad()
+        elif opcion == 'l':
+            limite_peticiones()
         elif opcion == 's':
             print("Saliendo del programa...")
             sys.exit(0)
