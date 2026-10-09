@@ -1,0 +1,8 @@
+Migracion usuarios bdreddoc -> bdtorio | Thu Oct  8 19:16:30 2026
+origen=556 migrados=550 ya_estaban=0 omitidos=6
+[omitido] 219 zapatacarlos1164@gmail.com -> 480
+[omitido] 263 juanr782@Gmail.com -> 315
+[omitido] 333 Leidy0107@gmail.com -> 355
+[omitido] 357 Martin.e.naranjo26@gmail.com -> 399
+[omitido] 379 Mariaomairagarciacartagena1969@gmail.com -> 423
+[omitido] 472 Antoniousuga@gmail.com -> 483

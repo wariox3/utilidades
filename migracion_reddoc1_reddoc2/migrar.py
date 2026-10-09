@@ -49,9 +49,13 @@ lado; sin ellas los datos se migran igual y los archivos se saltan con aviso:
   ITRIO_B2_KEY_ID/APP_KEY/BUCKET   bucket de itrio (basta solo lectura)
   TORIO_B2_KEY_ID/APP_KEY/BUCKET   bucket privado de torio (B2_BUCKET_PRIVADO)
   TORIO_B2_CDN_URL                 opcional, como B2_CDN_URL_PUBLICO de torio
-Opcionales, para crear tenants: TORIO_DIR y TORIO_PYTHON (por defecto
-/home/desarrollo/proyectos/torio y su entorno ~/.venvs/torio). Torio tiene que
-apuntar a la misma base que PG_DESTINO; si no, no se crea nada.
+Para crear tenants se usa el codigo de torio (TORIO_DIR, con su entorno
+TORIO_PYTHON; por defecto /home/desarrollo/proyectos/torio y ~/.venvs/torio),
+pero no su .env: la base es siempre la de PG_DESTINO y el dominio el de
+  TORIO_TENANT_BASE_DOMAIN         el TENANT_BASE_DOMAIN del torio de destino
+                                   (localhost en desarrollo)
+El codigo de TORIO_DIR tiene que estar en la misma version que el torio de
+destino: sus migraciones son las que se aplican al schema nuevo.
 """
 
 import argparse
@@ -1262,11 +1266,23 @@ def crear_tenant(schema):
                       "is_superuser": True, "accesos": accesos_plan} for m in miembros],
     }
 
-    info(f"Creando el tenant {schema} en torio (migraciones y catalogos, puede tardar)...")
+    # Torio se ejecuta con su codigo pero contra el destino de migrar.py: las
+    # variables de entorno mandan sobre el .env de torio (python-decouple).
+    destino = leer_conexion("PG_DESTINO")
+    dominio = config("TORIO_TENANT_BASE_DOMAIN", default="").strip()
+    if not dominio:
+        morir("Falta TORIO_TENANT_BASE_DOMAIN en .env: el dominio del tenant sera <schema>.<ese valor>")
+    entorno = os.environ | {
+        "DATABASE_HOST": destino["host"], "DATABASE_PORT": destino["port"],
+        "DATABASE_NAME": destino["dbname"], "DATABASE_USER": destino["user"],
+        "DATABASE_CLAVE": destino["password"], "TENANT_BASE_DOMAIN": dominio,
+    }
+    info(f"Creando el tenant {schema} en {destino['user']}@{destino['host']}:{destino['port']}/"
+         f"{destino['dbname']}, dominio {schema}.{dominio} (migraciones y catalogos, puede tardar)...")
     try:
         proceso = subprocess.run(
             [TORIO_PYTHON, str(DIR_SCRIPT / "crear_tenant_torio.py")],
-            cwd=TORIO_DIR, input=json.dumps(entrada, default=str),
+            cwd=TORIO_DIR, env=entorno, input=json.dumps(entrada, default=str),
             capture_output=True, text=True, check=False)
     except OSError as e:
         morir(f"No se pudo ejecutar torio ({TORIO_PYTHON}): {e}")
