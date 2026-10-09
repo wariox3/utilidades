@@ -6,16 +6,25 @@ mismo nombre en la base de destino (PG_DESTINO), copiando todo lo que sea
 compatible: solo las tablas que existen en ambos lados y, dentro de ellas,
 solo las columnas comunes.
 
+Al arrancar muestra un menu:
+  1. Migrar usuarios: pasa todos los usuarios de itrio (public.seguridad_user)
+     a torio (public.seg_usuario), en una sola transaccion: o todos o ninguno.
+  2. Migrar tenant: se escoge el tenant de itrio y se pregunta si se migran sus
+     archivos adjuntos; si no existe en torio se crea
+     ahi como lo hace la aplicacion (crear_tenant_torio.py) y despues se migran
+     sus datos, tabla por tabla. Necesita que los usuarios ya esten (opcion 1).
+
 Uso:
-  python3 migrar.py                 # pregunta el esquema y lo migra
+  python3 migrar.py                 # menu
+  python3 migrar.py -n              # ensayo: informe, no escribe (ambas opciones)
   python3 migrar.py -n              # ensayo: informe por tabla, no escribe
   python3 migrar.py -t gen_contacto # solo esa tabla (repetible)
   python3 migrar.py -m reemplazar   # vacia las tablas destino antes
   python3 migrar.py -F              # ignora las FK (mas datos, menos integridad)
   python3 migrar.py -x              # sin rescate fila a fila
 
-El esquema se pide siempre al arrancar, escogiendolo entre los que existen
-en ambas bases.
+Las opciones -t, -m, -F y -x solo aplican a la opcion 2. Con -n la opcion 2 no
+crea el tenant: solo puede ensayar uno que ya exista en torio.
 
 Modos (-m):
   completar  (por defecto) conserva lo que ya hay en destino e inserta lo que
@@ -35,20 +44,40 @@ bien, si migra a medias o si falla, y por que.
 Variables requeridas en .env (raiz del proyecto):
   PG_ORIGEN_DATABASE_HOST/USER/CLAVE/PORT/NAME
   PG_DESTINO_DATABASE_HOST/USER/CLAVE/PORT/NAME
+Para los archivos adjuntos (gen_archivo), las claves de Backblaze B2 de cada
+lado; sin ellas los datos se migran igual y los archivos se saltan con aviso:
+  ITRIO_B2_KEY_ID/APP_KEY/BUCKET   bucket de itrio (basta solo lectura)
+  TORIO_B2_KEY_ID/APP_KEY/BUCKET   bucket privado de torio (B2_BUCKET_PRIVADO)
+  TORIO_B2_CDN_URL                 opcional, como B2_CDN_URL_PUBLICO de torio
+Opcionales, para crear tenants: TORIO_DIR y TORIO_PYTHON (por defecto
+/home/desarrollo/proyectos/torio y su entorno ~/.venvs/torio). Torio tiene que
+apuntar a la misma base que PG_DESTINO; si no, no se crea nada.
 """
 
 import argparse
+import base64
 import datetime
+import io
+import json
+import os
 import re
+import subprocess
 import sys
 import tempfile
+import uuid as uuid_lib
 from pathlib import Path
 
 import psycopg2
+import psycopg2.extras
+import requests
+from b2sdk.v2 import B2Api, InMemoryAccountInfo
+from PIL import Image, ImageOps
 from psycopg2 import sql
 from decouple import config
 
 DIR_SCRIPT = Path(__file__).resolve().parent
+TORIO_DIR = config("TORIO_DIR", default="/home/desarrollo/proyectos/torio")
+TORIO_PYTHON = config("TORIO_PYTHON", default=os.path.expanduser("~/.venvs/torio/bin/python"))
 
 # Tablas de control de Django: migrarlas romperia el estado de migraciones.
 EXCLUIDAS = ["django_migrations", "django_content_type", "django_session"]
@@ -56,7 +85,8 @@ EXCLUIDAS = ["django_migrations", "django_content_type", "django_session"]
 # gen_identificacion son catalogos generales que el destino ya trae cargados y
 # cuyos ids ademas cambiaron de texto a bigint. gen_archivo cambio de forma en
 # reddoc2 (la referencia generica modelo/documento_id se normalizo en el par
-# modelo_id/objeto_id), asi que necesita una migracion propia.
+# modelo_id/objeto_id) y el archivo fisico cambia de bucket y de ruta: lo migra
+# Migrador.migrar_archivos al final de la opcion 2.
 IGNORADAS = ["gen_pais", "gen_estado", "gen_ciudad", "gen_identificacion", "gen_archivo"]
 
 # Modelos que cambiaron de nombre entre las dos bases: tabla del origen ->
@@ -89,10 +119,102 @@ REGLAS = {
     "gen_sede.centro_costo_id": 'o."grupo_id"::bigint',
     "gen_documento.centro_costo_id": 'o."grupo_contabilidad_id"::bigint',
     "gen_documento_detalle.centro_costo_id": 'o."grupo_id"::bigint',
+    # En hum_contrato grupo_id sigue siendo el grupo de nomina; el centro de
+    # costo venia en grupo_contabilidad_id.
+    "hum_contrato.centro_costo_id": 'o."grupo_contabilidad_id"::bigint',
     # electronico_id paso de integer a uuid y los ids viejos no tienen
     # equivalente: el documento migra sin el vinculo electronico.
     "gen_documento.electronico_id": "NULL",
 }
+
+# Columnas que se copian del origen aunque la fila ya exista en el destino. El
+# ON CONFLICT DO NOTHING conserva la fila del destino entera; estas columnas se
+# sobrescriben despues, por id, con el valor del origen tal cual.
+COPIAR_SIEMPRE = {
+    # El destino trae los tipos de documento precargados con consecutivo 1:
+    # sin esto la numeracion arrancaria de nuevo y repetiria documentos.
+    "gen_documento_tipo": ["consecutivo"],
+}
+
+# gen_empresa desaparecio en reddoc2: sus datos viven en las columnas
+# gen_empresa_* de gen_configuracion. Se leen de la empresa enlazada en
+# gen_configuracion.empresa_id y se escriben en la configuracion del mismo id.
+# La ciudad y el tipo de identificacion se buscan en el destino por codigo
+# porque esos catalogos no se migran (IGNORADAS). El origen no tiene razon
+# social: nombre_corto ya guarda el nombre legal completo.
+# El logo no se copia como ruta: ver LOGOS_ITRIO mas abajo.
+SQL_EMPRESA_ORIGEN = """
+SELECT c.id,
+       e.numero_identificacion, e.digito_verificacion, e.nombre_corto, e.direccion,
+       e.telefono, e.correo, e.imagen, e.tipo_persona_id,
+       ci.codigo AS ciudad_codigo, i.codigo AS identificacion_codigo
+FROM gen_configuracion c
+JOIN gen_empresa e ON e.id = c.empresa_id
+LEFT JOIN gen_ciudad ci ON ci.id = e.ciudad_id
+LEFT JOIN gen_identificacion i ON i.id = e.identificacion_id"""
+
+SQL_EMPRESA_DESTINO = """
+UPDATE gen_configuracion
+   SET gen_empresa_numero_identificacion = %(numero_identificacion)s,
+       gen_empresa_digito_verificacion   = %(digito_verificacion)s,
+       gen_empresa_nombre_corto          = %(nombre_corto)s,
+       gen_empresa_razon_social          = %(nombre_corto)s,
+       gen_empresa_direccion             = %(direccion)s,
+       gen_empresa_telefono              = %(telefono)s,
+       gen_empresa_correo                = %(correo)s,
+       gen_empresa_logotipo              = %(logotipo)s,
+       gen_empresa_tipo_persona_id       = %(tipo_persona_id)s,
+       gen_empresa_ciudad_id             = (SELECT id FROM gen_ciudad WHERE codigo = %(ciudad_codigo)s),
+       gen_empresa_identificacion_id     = (SELECT id FROM gen_identificacion WHERE codigo = %(identificacion_codigo)s)
+ WHERE id = %(id)s
+RETURNING gen_empresa_ciudad_id, gen_empresa_identificacion_id"""
+
+# En itrio el logo es un archivo en el bucket publico de DigitalOcean Spaces y
+# gen_empresa.imagen guarda su ruta (itrio/prod/empresa/logo_52_1.jpg). En torio
+# vive en gen_configuracion.gen_empresa_logotipo como PNG en base64, sin prefijo
+# data:, y siempre normalizado igual (general/servicios/logotipo.py de torio):
+# derecho segun el EXIF, transparencia sobre blanco, a lo sumo 400 px de lado.
+# El logo por defecto de itrio no se migra: sin logotipo, torio deja el recuadro
+# vacio en vez de imprimir el generico.
+LOGOS_ITRIO = "https://semantica.sfo3.digitaloceanspaces.com/"
+LOGO_DEFECTO_ITRIO = "logo_defecto"
+LADO_MAXIMO_LOGOTIPO = 400
+
+# Archivos adjuntos. En itrio el archivo esta en su bucket B2 con la ruta
+# <schema>/<uuid>_<nombre> y gen_archivo.almacenamiento_id guarda el file id de
+# B2; la fila apunta a un documento (documento_id) o, con modelo + codigo, a otro
+# registro. En torio esta en el bucket privado con la ruta
+# <cliente_id>/archivos/<modelo_id>/<anio>/<mes>/<uuid>.<ext> (la de
+# general/servicios/archivo.py), almacenamiento_id guarda esa ruta y la fila
+# apunta a gen_modelo + objeto_id. Se conservan el uuid y la fecha de subida.
+SQL_ARCHIVOS_ORIGEN = """
+SELECT id, fecha, archivo_tipo_id, nombre, tipo, tamano, almacenamiento_id, uuid,
+       codigo, modelo, documento_id
+FROM gen_archivo
+ORDER BY id"""
+
+# modelo de itrio -> (tabla del destino, clase de gen_modelo). Sin modelo, el
+# archivo es de un documento.
+MODELOS_ARCHIVO = {
+    None: ("gen_documento", "GenDocumento"),
+    "contacto": ("gen_contacto", "GenContacto"),
+}
+
+SQL_ARCHIVO_DESTINO = """
+INSERT INTO gen_archivo
+       (fecha, archivo_tipo_id, modelo_id, objeto_id, nombre, tipo, tamano, almacenamiento_id, uuid, url)
+VALUES (%(fecha)s, %(archivo_tipo_id)s, %(modelo_id)s, %(objeto_id)s, %(nombre)s, %(tipo)s,
+        %(tamano)s, %(key)s, %(uuid)s, %(url)s)"""
+
+
+def conectar_b2(prefijo):
+    """Bucket de B2 con las claves PREFIJO_B2_*, o None si faltan."""
+    claves = [config(f"{prefijo}_B2_{n}", default="").strip() for n in ("KEY_ID", "APP_KEY", "BUCKET")]
+    if not all(claves):
+        return None
+    api = B2Api(InMemoryAccountInfo())
+    api.authorize_account("production", claves[0], claves[1])
+    return api.get_bucket_by_name(claves[2])
 
 
 # ---------------------------------------------------------------- utilidades
@@ -252,7 +374,7 @@ class Columnas:
 # ------------------------------------------------------------------ migrador
 
 class Migrador:
-    def __init__(self, args):
+    def __init__(self, args, esquema):
         self.args = args
         self.datos_origen = leer_conexion("PG_ORIGEN")
         self.datos_destino = leer_conexion("PG_DESTINO")
@@ -264,7 +386,7 @@ class Migrador:
         self.origen.set_session(readonly=True, autocommit=True)
         self.destino = conectar(d, "destino")
         self.errores = []
-        self.esquema = self.pedir_esquema()
+        self.esquema = esquema
 
         if args.sin_fk:
             with self.destino.cursor() as cursor:
@@ -272,47 +394,6 @@ class Migrador:
             self.destino.commit()
 
         self.planificar()
-
-    # ------------------------------------------------------------- esquema
-
-    def pedir_esquema(self):
-        """Muestra los esquemas que existen en ambas bases y pide uno."""
-        consulta = """SELECT nspname FROM pg_namespace
-                       WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema'"""
-        esquemas = {}
-        for conexion, nombre in ((self.origen, "origen"), (self.destino, "destino")):
-            with conexion.cursor() as cursor:
-                cursor.execute(consulta)
-                esquemas[nombre] = {fila[0] for fila in cursor.fetchall()}
-        self.destino.commit()
-
-        comunes = sorted(esquemas["origen"] & esquemas["destino"])
-        if not comunes:
-            morir("No hay esquemas con el mismo nombre en origen y destino")
-
-        o, d = self.datos_origen["dbname"], self.datos_destino["dbname"]
-        print(f"\n=== Esquemas presentes en {o} y {d} ===")
-        for indice, esquema in enumerate(comunes, start=1):
-            print(f"  {indice:>3}. {esquema}")
-        print("    q. Salir")
-
-        while True:
-            opcion = input("\nEsquema a migrar (numero o nombre): ").strip()
-            if opcion.lower() == "q":
-                print("Operacion cancelada.")
-                sys.exit(0)
-            if opcion.isdigit() and 1 <= int(opcion) <= len(comunes):
-                esquema = comunes[int(opcion) - 1]
-            elif opcion in comunes:
-                esquema = opcion
-            else:
-                faltan = [n for n in ("origen", "destino")
-                          if opcion and not opcion.isdigit() and opcion not in esquemas[n]]
-                error(f"El esquema {opcion} no existe en el {' ni en el '.join(faltan)}" if faltan
-                      else "Opcion no valida.")
-                continue
-            print()
-            return esquema
 
     # --------------------------------------------------------------- plan
 
@@ -460,6 +541,9 @@ $rescate$"""
 
         self.destino.rollback()
         self.informe_simulacion(resultados)
+        archivos = self.migrar_archivos(simulacion=True) if self.args.archivos else {}
+        if archivos:
+            info("Archivos adjuntos: " + ", ".join(f"{e} {c}" for e, c in archivos.items()))
 
     def ensayar_tabla(self, cursor, tabla, columnas, archivo):
         """Devuelve (estado, motivo) del ensayo de una tabla. Cada intento va en
@@ -571,6 +655,224 @@ $rescate$"""
             self.errores.append(f"[{tabla}] rescate: {mensaje_error(e)}")
             return "❌ fallo la carga"
 
+    def copiar_columnas(self):
+        """Sobrescribe en el destino las columnas de COPIAR_SIEMPRE con el
+        valor del origen, por id; devuelve las filas actualizadas por tabla."""
+        actualizadas = {}
+        for tabla, columnas in COPIAR_SIEMPRE.items():
+            if tabla not in self.plan:
+                continue
+            tabla_origen = self.nombre_en_origen.get(tabla, tabla)
+            for columna in columnas:
+                tipo = self.catalogo_destino[tabla][columna]
+                with self.origen.cursor() as cursor:
+                    cursor.execute(sql.SQL("SELECT id::text, {}::text FROM {}.{}").format(
+                        sql.Identifier(columna), sql.Identifier(self.esquema), sql.Identifier(tabla_origen)))
+                    filas = cursor.fetchall()
+                if not filas:
+                    continue
+                ids, valores = zip(*filas)
+                with self.destino.cursor() as cursor:
+                    cursor.execute(sql.SQL("""
+                        UPDATE {esquema}.{tabla} t
+                           SET {columna} = v.valor::{tipo}
+                          FROM unnest(%s::text[], %s::text[]) AS v(id, valor)
+                         WHERE t.id::text = v.id
+                           AND t.{columna} IS DISTINCT FROM v.valor::{tipo}""").format(
+                        esquema=sql.Identifier(self.esquema), tabla=sql.Identifier(tabla),
+                        columna=sql.Identifier(columna), tipo=sql.SQL(tipo)),
+                        (list(ids), list(valores)))
+                    actualizadas[f"{tabla}.{columna}"] = cursor.rowcount
+                self.destino.commit()
+        return actualizadas
+
+    @staticmethod
+    def logotipo(ruta):
+        """El logo de itrio como lo guarda torio, o None si no hay o no se pudo
+        leer. Un logo que falta no frena la migracion: se avisa y sigue."""
+        if not ruta or LOGO_DEFECTO_ITRIO in ruta:
+            return None
+        url = LOGOS_ITRIO + ruta
+        try:
+            respuesta = requests.get(url, timeout=30)
+            respuesta.raise_for_status()
+            imagen = ImageOps.exif_transpose(Image.open(io.BytesIO(respuesta.content)))
+            if imagen.mode == "P":
+                imagen = imagen.convert("RGBA")
+            if imagen.mode in ("RGBA", "LA"):
+                fondo = Image.new("RGB", imagen.size, (255, 255, 255))
+                fondo.paste(imagen, mask=imagen.getchannel("A"))
+                imagen = fondo
+            else:
+                imagen = imagen.convert("RGB")
+            imagen.thumbnail((LADO_MAXIMO_LOGOTIPO, LADO_MAXIMO_LOGOTIPO), Image.LANCZOS)
+            buffer = io.BytesIO()
+            imagen.save(buffer, format="PNG", optimize=True)
+        except (requests.RequestException, OSError, ValueError) as e:
+            aviso(f"Empresa: no se pudo leer el logo {url}: {e}")
+            return None
+        return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    def copiar_empresa(self):
+        """Pasa los datos de gen_empresa del origen a gen_configuracion del
+        destino; devuelve cuantas configuraciones se actualizaron."""
+        if "gen_configuracion" not in self.plan or "gen_empresa" in self.catalogo_destino:
+            return 0
+        if "gen_empresa" not in self.catalogo_origen \
+                or "empresa_id" not in self.catalogo_origen.get("gen_configuracion", {}):
+            return 0
+
+        with self.origen.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            self.preparar_sesion(cursor)
+            cursor.execute(SQL_EMPRESA_ORIGEN)
+            empresas = cursor.fetchall()
+
+        actualizadas = 0
+        with self.destino.cursor() as cursor:
+            self.preparar_sesion(cursor)
+            for empresa in empresas:
+                empresa["logotipo"] = self.logotipo(empresa["imagen"])
+                cursor.execute(SQL_EMPRESA_DESTINO, empresa)
+                fila = cursor.fetchone()
+                if fila is None:
+                    aviso(f"gen_configuracion {empresa['id']} no existe en el destino: empresa sin copiar")
+                    continue
+                actualizadas += 1
+                ciudad_id, identificacion_id = fila
+                if empresa["ciudad_codigo"] and ciudad_id is None:
+                    aviso(f"Empresa: la ciudad {empresa['ciudad_codigo']} no existe en el destino")
+                if empresa["identificacion_codigo"] and identificacion_id is None:
+                    aviso(f"Empresa: la identificacion {empresa['identificacion_codigo']} no existe en el destino")
+        self.destino.commit()
+        return actualizadas
+
+    def leer_archivos(self):
+        """Archivos del origen, ya resueltos contra el destino: cada uno con
+        su modelo_id, objeto_id y la ruta que tendra en torio, o con el motivo
+        por el que no se migra."""
+        if "gen_archivo" not in self.catalogo_origen or "gen_archivo" not in self.catalogo_destino:
+            return []
+        with self.origen.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            self.preparar_sesion(cursor)
+            cursor.execute(SQL_ARCHIVOS_ORIGEN)
+            archivos = cursor.fetchall()
+        if not archivos:
+            return []
+
+        with self.destino.cursor() as cursor:
+            self.preparar_sesion(cursor)
+            cursor.execute("SELECT id FROM public.ctn_cliente WHERE schema_name = %s", (self.esquema,))
+            cliente = cursor.fetchone()
+            cursor.execute("SELECT clase, id FROM gen_modelo")
+            modelos = dict(cursor.fetchall())
+            cursor.execute("SELECT uuid::text FROM gen_archivo")
+            ya_estan = {fila[0] for fila in cursor.fetchall()}
+            existentes = {}
+            for tabla, _ in MODELOS_ARCHIVO.values():
+                cursor.execute(sql.SQL("SELECT id::text FROM {}").format(sql.Identifier(tabla)))
+                existentes[tabla] = {fila[0] for fila in cursor.fetchall()}
+        self.destino.commit()
+        if cliente is None:
+            morir(f"El tenant {self.esquema} no esta en public.ctn_cliente del destino")
+
+        url_cdn = config("TORIO_B2_CDN_URL", default="").strip().rstrip("/")
+        for a in archivos:
+            a["motivo"] = None
+            destino = MODELOS_ARCHIVO.get(a["modelo"])
+            objeto = a["documento_id"] if a["modelo"] is None else a["codigo"]
+            try:
+                a["uuid"] = str(uuid_lib.UUID(a["uuid"]))
+            except (TypeError, ValueError):
+                a["motivo"] = f"uuid invalido: {a['uuid']}"
+                continue
+            if destino is None:
+                a["motivo"] = f"modelo de itrio sin equivalente: {a['modelo']}"
+            elif destino[1] not in modelos:
+                a["motivo"] = f"{destino[1]} no esta en gen_modelo del destino"
+            elif objeto is None or str(objeto) not in existentes[destino[0]]:
+                a["motivo"] = f"{destino[0]} {objeto} no existe en el destino"
+            elif a["uuid"] in ya_estan:
+                a["motivo"] = "ya migrado"
+            if a["motivo"]:
+                continue
+            a["modelo_id"] = modelos[destino[1]]
+            a["objeto_id"] = str(objeto)
+            a["tamano"] = int(a["tamano"])
+            extension = os.path.splitext(a["nombre"])[1].lower().lstrip(".")
+            nombre = f"{a['uuid']}.{extension}" if extension else a["uuid"]
+            a["key"] = f"{cliente[0]}/archivos/{a['modelo_id']}/{a['fecha']:%Y/%m}/{nombre}"
+            a["url"] = f"{url_cdn}/{a['key']}" if url_cdn else None
+        return archivos
+
+    def migrar_archivos(self, simulacion=False):
+        """Copia los adjuntos del bucket de itrio al de torio y crea sus filas.
+        Un archivo que falla se avisa y se salta: no frena al resto. Devuelve
+        {estado: cantidad} para el informe."""
+        archivos = self.leer_archivos()
+        if not archivos:
+            return {}
+        conteo = {}
+
+        def contar_estado(estado):
+            conteo[estado] = conteo.get(estado, 0) + 1
+
+        pendientes = []
+        for a in archivos:
+            if a["motivo"] == "ya migrado":
+                contar_estado("ya migrados")
+            elif a["motivo"]:
+                contar_estado("omitidos")
+                self.errores.append(f"[gen_archivo {a['id']}] {a['nombre']}: {a['motivo']}")
+            else:
+                pendientes.append(a)
+        if not pendientes:
+            return conteo
+
+        try:
+            origen_b2 = conectar_b2("ITRIO")
+            destino_b2 = None if simulacion else conectar_b2("TORIO")
+        except Exception as e:
+            aviso(f"Archivos: no se pudo conectar a Backblaze: {e}")
+            return conteo | {"sin migrar (B2)": len(pendientes)}
+        if origen_b2 is None or (destino_b2 is None and not simulacion):
+            aviso("Archivos: faltan las claves ITRIO_B2_* o TORIO_B2_* en .env; se saltan "
+                  f"{len(pendientes)} archivos")
+            return conteo | {"sin migrar (B2)": len(pendientes)}
+
+        info(f"{'Revisando' if simulacion else 'Copiando'} {len(pendientes)} archivos en Backblaze...")
+        for numero, a in enumerate(pendientes, start=1):
+            try:
+                if simulacion:
+                    # Con -n solo se comprueba que el archivo exista en itrio.
+                    origen_b2.api.get_file_info(a["almacenamiento_id"])
+                    contar_estado("se copiarian")
+                    continue
+                contenido = io.BytesIO()
+                origen_b2.download_file_by_id(a["almacenamiento_id"]).save(contenido)
+                subido = destino_b2.upload_bytes(contenido.getvalue(), a["key"], content_type=a["tipo"])
+            except Exception as e:
+                contar_estado("fallidos")
+                self.errores.append(f"[gen_archivo {a['id']}] {a['nombre']}: B2: {e}")
+                continue
+            try:
+                with self.destino.cursor() as cursor:
+                    self.preparar_sesion(cursor)
+                    cursor.execute(SQL_ARCHIVO_DESTINO, a)
+                self.destino.commit()
+                contar_estado("copiados")
+            except psycopg2.Error as e:
+                self.destino.rollback()
+                # Sin fila que lo referencie el objeto quedaria huerfano en B2.
+                try:
+                    destino_b2.delete_file_version(subido.id_, a["key"])
+                except Exception:
+                    self.errores.append(f"[gen_archivo {a['id']}] quedo huerfano en B2: {a['key']}")
+                contar_estado("fallidos")
+                self.errores.append(f"[gen_archivo {a['id']}] {a['nombre']}: {mensaje_error(e)}")
+            if numero % 100 == 0:
+                info(f"  {numero} de {len(pendientes)}")
+        return conteo
+
     def ajustar_secuencias(self):
         # Las secuencias quedan atras si se insertaron ids explicitos.
         info(f"Ajustando secuencias del esquema {self.esquema}...")
@@ -649,7 +951,21 @@ $secuencias$""").format(esquema=sql.Literal(self.esquema))
                 print(f"{tabla:<34} {filas_origen:>8} {insertadas:>10} {omitidas:>10}  {estado}")
                 log.write(f"[{tabla}] origen={filas_origen} insertadas={insertadas} omitidas={omitidas} {estado}\n")
 
+            for clave, cantidad in self.copiar_columnas().items():
+                info(f"Copiado del origen {clave}: {cantidad} filas actualizadas")
+                log.write(f"[{clave}] copiado del origen: {cantidad} filas actualizadas\n")
+            empresas = self.copiar_empresa()
+            if empresas:
+                info(f"Datos de gen_empresa copiados a gen_configuracion: {empresas}")
+                log.write(f"[gen_configuracion] datos de gen_empresa copiados: {empresas}\n")
             self.ajustar_secuencias()
+            if not self.args.archivos:
+                log.write("[gen_archivo] no se migraron: se escogio no migrar archivos\n")
+            archivos = self.migrar_archivos() if self.args.archivos else {}
+            if archivos:
+                resumen = ", ".join(f"{estado} {cantidad}" for estado, cantidad in archivos.items())
+                info(f"Archivos adjuntos: {resumen}")
+                log.write(f"[gen_archivo] {resumen}\n")
 
             print()
             ok(f"Tablas migradas por completo: {migradas}")
@@ -672,12 +988,309 @@ $secuencias$""").format(esquema=sql.Literal(self.esquema))
         ok(f"Registro: {registro}")
 
 
+# ------------------------------------------------------------------ usuarios
+
+# Usuarios de itrio tal como los necesita torio. El correo pasa en minusculas:
+# torio los guarda asi al registrar y el login compara con `=`. Todos pasan
+# verificados: itrio no exigia verificar el correo para entrar y torio si, asi
+# que migrar `verificado` tal cual dejaria fuera a usuarios que hoy entran.
+SQL_USUARIOS_ORIGEN = """
+SELECT id, password, last_login, lower(username) AS email, username AS email_original,
+       is_active, true AS is_verified,
+       coalesce(nombre_corto, nullif(trim(concat_ws(' ', nombre, apellido)), '')) AS nombre_corto,
+       numero_identificacion, telefono AS celular, idioma, fecha_creacion,
+       vr_saldo AS saldo_pendiente
+FROM public.seguridad_user
+ORDER BY id"""
+
+SQL_USUARIOS_REFERENCIADOS = """
+SELECT usuario_id FROM public.cnt_usuario_contenedor
+UNION SELECT usuario_id FROM public.cnt_contenedor WHERE usuario_id IS NOT NULL"""
+
+# Un usuario de torio es solo su fila en seg_usuario: el registro de torio
+# (seguridad/serializers/usuario.py) no lo vincula a ningun cliente, ni siquiera
+# a public. Las membresias y los permisos llegan al crear o migrar cada tenant.
+SQL_USUARIO_DESTINO = """
+INSERT INTO public.seg_usuario
+       (id, password, last_login, email, is_active, is_verified, nombre_corto,
+        numero_identificacion, celular, idioma, fecha_creacion, saldo_pendiente)
+VALUES (%(id)s, %(password)s, %(last_login)s, %(email)s, %(is_active)s, %(is_verified)s,
+        %(nombre_corto)s, %(numero_identificacion)s, %(celular)s, %(idioma)s,
+        %(fecha_creacion)s, %(saldo_pendiente)s)"""
+
+def elegir_usuarios(usuarios):
+    """Uno por correo. Itrio distinguia mayusculas y torio no: entre los que
+    comparten correo gana el ultimo que inicio sesion, luego el que ya estaba
+    escrito en minusculas y luego el id mas bajo. Devuelve (elegidos, omitidos)."""
+    por_correo = {}
+    for usuario in usuarios:
+        por_correo.setdefault(usuario["email"], []).append(usuario)
+    elegidos, omitidos = [], []
+    minimo = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    for grupo in por_correo.values():
+        grupo.sort(key=lambda u: (u["last_login"] or minimo,
+                                  u["email_original"] == u["email"], -u["id"]), reverse=True)
+        elegidos.append(grupo[0])
+        omitidos += [(u, grupo[0]) for u in grupo[1:]]
+    elegidos.sort(key=lambda u: u["id"])
+    return elegidos, omitidos
+
+
+class MigradorUsuarios:
+    """Opcion 1: todos los usuarios de itrio a torio, en una sola transaccion.
+    Los usuarios conservan su id (asi todo lo que los referencia en los
+    esquemas sigue valiendo) y su clave, porque las dos aplicaciones guardan el
+    mismo hash de Django. Si un usuario ya esta en torio con el mismo id y el
+    mismo correo se salta; cualquier otro choque aborta sin escribir nada."""
+
+    def __init__(self, args):
+        self.args = args
+        self.datos_origen = leer_conexion("PG_ORIGEN")
+        self.datos_destino = leer_conexion("PG_DESTINO")
+        self.origen = conectar(self.datos_origen, "origen")
+        self.origen.set_session(readonly=True, autocommit=True)
+        self.destino = conectar(self.datos_destino, "destino")
+
+    def leer_origen(self):
+        with self.origen.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute(SQL_USUARIOS_ORIGEN)
+            usuarios = cursor.fetchall()
+            cursor.execute(SQL_USUARIOS_REFERENCIADOS)
+            referenciados = {fila["usuario_id"] for fila in cursor.fetchall()}
+        return usuarios, referenciados
+
+    def leer_destino(self):
+        with self.destino.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('public.seg_usuario') IS NOT NULL")
+            if not cursor.fetchone()[0]:
+                morir("El destino no tiene public.seg_usuario: no es una base de torio")
+            cursor.execute("SELECT id, email FROM public.seg_usuario")
+            existentes = dict(cursor.fetchall())
+        self.destino.commit()
+        return existentes
+
+    def migrar(self):
+        o, d = self.datos_origen, self.datos_destino
+        print(f"Origen : {o['user']}@{o['host']}:{o['port']}/{o['dbname']}  public.seguridad_user")
+        print(f"Destino: {d['user']}@{d['host']}:{d['port']}/{d['dbname']}  public.seg_usuario\n")
+
+        usuarios, referenciados = self.leer_origen()
+        elegidos, omitidos = elegir_usuarios(usuarios)
+        existentes = self.leer_destino()
+        por_correo = {email.lower(): id_ for id_, email in existentes.items()}
+
+        nuevos, ya_estaban, choques = [], [], []
+        for u in elegidos:
+            if existentes.get(u["id"], "").lower() == u["email"]:
+                ya_estaban.append(u)
+            elif u["id"] in existentes:
+                choques.append(f"id {u['id']}: en torio es {existentes[u['id']]}, en itrio {u['email']}")
+            elif u["email"] in por_correo:
+                choques.append(f"{u['email']}: en torio tiene id {por_correo[u['email']]}, en itrio {u['id']}")
+            else:
+                nuevos.append(u)
+
+        info(f"Usuarios en itrio: {len(usuarios)}")
+        if omitidos:
+            aviso(f"Correos repetidos (solo cambian mayusculas): se omiten {len(omitidos)}")
+            for omitido, elegido in omitidos:
+                marca = "  ⚠️  tiene tenants en itrio" if omitido["id"] in referenciados else ""
+                print(f"     {omitido['id']:>5} {omitido['email_original']:<45} -> queda {elegido['id']}{marca}")
+        if ya_estaban:
+            info(f"Ya estaban en torio (mismo id y correo): {len(ya_estaban)}")
+        if choques:
+            error(f"Choques con usuarios de torio: {len(choques)}")
+            for choque in choques:
+                print(f"     {choque}")
+            morir("No se migro ningun usuario: resuelva los choques y vuelva a correr")
+        if not nuevos:
+            ok("No hay usuarios nuevos que migrar")
+            return
+
+        ids = [u["id"] for u in nuevos]
+        try:
+            with self.destino.cursor() as cursor:
+                psycopg2.extras.execute_batch(cursor, SQL_USUARIO_DESTINO, nuevos, page_size=500)
+                # Los ids explicitos dejan atras la identidad de seg_usuario.
+                cursor.execute("""SELECT setval(pg_get_serial_sequence('public.seg_usuario', 'id'),
+                                                (SELECT max(id) FROM public.seg_usuario))""")
+                cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        except psycopg2.Error as e:
+            self.destino.rollback()
+            morir(f"No se migro ningun usuario: {mensaje_error(e)}")
+
+        if self.args.simulacion:
+            self.destino.rollback()
+        else:
+            self.destino.commit()
+
+        verbo = "Se migrarian" if self.args.simulacion else "Usuarios migrados"
+        ok(f"{verbo}: {len(nuevos)}")
+        inactivos = sum(1 for u in nuevos if not u["is_active"])
+        if inactivos:
+            info(f"Inactivos: {inactivos}")
+        if self.args.simulacion:
+            print()
+            aviso("Simulacion: no se escribio nada en el destino.")
+        else:
+            marca = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            registro = DIR_SCRIPT / f"migracion_usuarios_{marca}.txt"
+            with open(registro, "w", encoding="utf-8") as log:
+                log.write(f"Migracion usuarios {o['dbname']} -> {d['dbname']} | {datetime.datetime.now():%c}\n")
+                log.write(f"origen={len(usuarios)} migrados={len(nuevos)} ya_estaban={len(ya_estaban)} "
+                          f"omitidos={len(omitidos)}\n")
+                for omitido, elegido in omitidos:
+                    log.write(f"[omitido] {omitido['id']} {omitido['email_original']} -> {elegido['id']}\n")
+            ok(f"Registro: {registro}")
+
+
+# ------------------------------------------------------------------- tenants
+
+SQL_TENANTS_ORIGEN = """
+SELECT c.id, c.schema_name, c.nombre
+FROM public.cnt_contenedor c
+WHERE c.schema_name <> 'public'
+ORDER BY c.schema_name"""
+
+# El cliente de torio toma correo y celular del dueno, como cuando el dueno lo
+# crea desde la aplicacion.
+SQL_TENANT_ORIGEN = """
+SELECT c.id, c.schema_name, c.nombre, c.usuario_id AS owner_id, c.fecha AS fecha_creacion,
+       c.fecha_ultima_conexion, lower(u.username) AS correo, coalesce(u.telefono, '') AS celular,
+       p.venta, p.compra, p.tesoreria, p.cartera, p.inventario, p.humano, p.contabilidad
+FROM public.cnt_contenedor c
+JOIN public.seguridad_user u ON u.id = c.usuario_id
+LEFT JOIN public.cnt_plan p ON p.id = c.plan_id
+WHERE c.schema_name = %s"""
+
+SQL_MIEMBROS_ORIGEN = """
+SELECT usuario_id, rol FROM public.cnt_usuario_contenedor WHERE contenedor_id = %s ORDER BY usuario_id"""
+
+# Modulos del plan de itrio -> flags acceso_* de torio. turno no existia en itrio.
+MODULOS_PLAN = ("venta", "compra", "tesoreria", "cartera", "inventario", "humano", "contabilidad")
+
+
+def elegir_tenant(args):
+    """Lista los tenants de itrio, marcando los que ya existen en torio, y
+    devuelve el schema escogido."""
+    origen = conectar(leer_conexion("PG_ORIGEN"), "origen")
+    destino = conectar(leer_conexion("PG_DESTINO"), "destino")
+    with origen.cursor() as cursor:
+        cursor.execute(SQL_TENANTS_ORIGEN)
+        tenants = cursor.fetchall()
+    with destino.cursor() as cursor:
+        cursor.execute("SELECT schema_name FROM public.ctn_cliente")
+        en_torio = {fila[0] for fila in cursor.fetchall()}
+    origen.close()
+    destino.close()
+
+    print("\n=== Tenants de itrio (✓ = ya existe en torio) ===")
+    for indice, (_, schema, nombre) in enumerate(tenants, start=1):
+        marca = "✓" if schema in en_torio else " "
+        print(f"  {indice:>3}. {marca} {schema:<32} {nombre or ''}")
+    print("    q. Salir")
+
+    schemas = [t[1] for t in tenants]
+    while True:
+        opcion = input("\nTenant a migrar (numero o schema): ").strip()
+        if opcion.lower() == "q":
+            print("Operacion cancelada.")
+            sys.exit(0)
+        if opcion.isdigit() and 1 <= int(opcion) <= len(schemas):
+            schema = schemas[int(opcion) - 1]
+        elif opcion in schemas:
+            schema = opcion
+        else:
+            error("Opcion no valida.")
+            continue
+        if args.simulacion and schema not in en_torio:
+            error(f"{schema} no existe en torio y con -n no se crea: escoja uno marcado con ✓")
+            continue
+        print()
+        return schema, schema in en_torio
+
+
+def preguntar_archivos(schema):
+    """Pregunta si se migran los archivos adjuntos del tenant, contando antes
+    cuantos tiene en itrio. Copiarlos es lo lento: un archivo por segundo."""
+    origen = conectar(leer_conexion("PG_ORIGEN"), "origen")
+    with origen.cursor() as cursor:
+        cursor.execute("SELECT to_regclass(%s) IS NOT NULL", (f'"{schema}".gen_archivo',))
+        cantidad, tamano = 0, 0
+        if cursor.fetchone()[0]:
+            cursor.execute(sql.SQL("SELECT count(*), coalesce(sum(tamano), 0) FROM {}.gen_archivo").format(
+                sql.Identifier(schema)))
+            cantidad, tamano = cursor.fetchone()
+    origen.close()
+    if not cantidad:
+        return False
+
+    print(f"El tenant tiene {cantidad} archivos adjuntos ({float(tamano) / 1024 / 1024:.1f} MB) en Backblaze.")
+    while True:
+        respuesta = input("¿Desea migrar los archivos? (s/n): ").strip().lower()
+        if respuesta in ("s", "si", "sí"):
+            print()
+            return True
+        if respuesta in ("n", "no"):
+            print()
+            return False
+        error("Responda s o n.")
+
+
+def crear_tenant(schema):
+    """Crea el tenant en torio con crear_tenant_torio.py, dentro del entorno de
+    torio. El dueno es propietario con todos los modulos; control e invitado
+    entran como superusuarios con los modulos que incluia su plan en itrio."""
+    origen = conectar(leer_conexion("PG_ORIGEN"), "origen")
+    with origen.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+        cursor.execute(SQL_TENANT_ORIGEN, (schema,))
+        tenant = cursor.fetchone()
+        cursor.execute(SQL_MIEMBROS_ORIGEN, (tenant["id"],))
+        miembros = cursor.fetchall()
+    origen.close()
+
+    # Sin plan (no deberia pasar fuera de public) se dan todos los modulos.
+    con_plan = tenant["venta"] is not None
+    accesos_plan = {f"acceso_{m}": (tenant[m] if con_plan else True) for m in MODULOS_PLAN}
+    accesos_plan["acceso_turno"] = False
+    entrada = {
+        "base": {k: leer_conexion("PG_DESTINO")[k] for k in ("dbname", "host", "port")},
+        "cliente": {k: tenant[k] for k in ("id", "schema_name", "owner_id", "fecha_creacion",
+                                           "fecha_ultima_conexion", "correo", "celular")}
+                   | {"nombre": tenant["nombre"] or schema},
+        "miembros": [{"usuario_id": m["usuario_id"], "propietario": m["rol"] == "propietario",
+                      "is_superuser": True, "accesos": accesos_plan} for m in miembros],
+    }
+
+    info(f"Creando el tenant {schema} en torio (migraciones y catalogos, puede tardar)...")
+    try:
+        proceso = subprocess.run(
+            [TORIO_PYTHON, str(DIR_SCRIPT / "crear_tenant_torio.py")],
+            cwd=TORIO_DIR, input=json.dumps(entrada, default=str),
+            capture_output=True, text=True, check=False)
+    except OSError as e:
+        morir(f"No se pudo ejecutar torio ({TORIO_PYTHON}): {e}")
+    lineas = proceso.stdout.strip().splitlines()
+    try:
+        resultado = json.loads(lineas[-1])
+    except (IndexError, json.JSONDecodeError):
+        morir(f"crear_tenant_torio.py no devolvio resultado:\n{proceso.stdout}{proceso.stderr}")
+    if resultado["estado"] == "error":
+        morir(f"No se creo el tenant {schema}:\n{resultado.get('detalle')}")
+    if resultado["estado"] == "existe":
+        info(f"El tenant {schema} ya existia en torio")
+    else:
+        ok(f"Tenant {schema} creado en torio (id {resultado['id']}, {resultado['miembros']} miembros, "
+           "suscripcion de prueba)")
+    print()
+
+
 # ------------------------------------------------------------------ ejecucion
 
 def leer_argumentos():
     parser = argparse.ArgumentParser(
-        description="Migra un esquema de PG_ORIGEN a PG_DESTINO copiando tablas y columnas comunes. "
-                    "El esquema se pide siempre al arrancar.")
+        description="Migra de itrio (PG_ORIGEN) a torio (PG_DESTINO): los usuarios o los datos "
+                    "de un tenant, segun la opcion que se escoja en el menu.")
     parser.add_argument("-m", dest="modo", default="completar", choices=("completar", "reemplazar"),
                         help="completar conserva lo del destino; reemplazar lo vacia antes")
     parser.add_argument("-t", dest="tablas", action="append", default=[],
@@ -690,9 +1303,31 @@ def leer_argumentos():
     return parser.parse_args()
 
 
+def mostrar_menu():
+    print("\n=== Migracion itrio -> torio ===")
+    print("  1. Migrar usuarios")
+    print("  2. Migrar tenant")
+    print("  q. Salir")
+    while True:
+        opcion = input("\nSeleccione una opcion: ").strip().lower()
+        if opcion in ("1", "2"):
+            return opcion
+        if opcion == "q":
+            print("Operacion cancelada.")
+            sys.exit(0)
+        error("Opcion no valida.")
+
+
 def main():
     args = leer_argumentos()
-    migrador = Migrador(args)
+    if mostrar_menu() == "1":
+        MigradorUsuarios(args).migrar()
+        return
+    schema, existe = elegir_tenant(args)
+    args.archivos = preguntar_archivos(schema)
+    if not existe:
+        crear_tenant(schema)
+    migrador = Migrador(args, schema)
     migrador.encabezado()
     if args.simulacion:
         migrador.simular()
