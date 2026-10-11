@@ -135,10 +135,13 @@ REGLAS = {
 # ON CONFLICT DO NOTHING conserva la fila del destino entera; estas columnas se
 # sobrescriben despues, por id, con el valor del origen tal cual. Una columna
 # que cambio de nombre se escribe como par (columna del destino, del origen).
+# Un valor vacio (NULL) en el origen no borra lo que ya tenga el destino.
 COPIAR_SIEMPRE = {
-    # El destino trae los tipos de documento precargados con consecutivo 1:
-    # sin esto la numeracion arrancaria de nuevo y repetiria documentos.
-    "gen_documento_tipo": ["consecutivo"],
+    # El destino trae los tipos de documento precargados con consecutivo 1 y
+    # sin configurar: sin esto la numeracion arrancaria de nuevo y repetiria
+    # documentos, y se perderian la resolucion y las cuentas por cobrar y por
+    # pagar de cada tipo. Los ids de gen_resolucion y con_cuenta se conservan.
+    "gen_documento_tipo": ["consecutivo", "resolucion_id", "cuenta_cobrar_id", "cuenta_pagar_id"],
     # La configuracion la crea torio con el tenant, asi que la fila del origen
     # nunca entra; los textos de la factura ademas cambiaron de nombre.
     "gen_configuracion": [
@@ -146,6 +149,11 @@ COPIAR_SIEMPRE = {
         ("ven_factura_informacion_superior", "informacion_factura_superior"),
     ],
 }
+
+# Columnas de COPIAR_SIEMPRE que solo pueden subir: si el destino ya va por
+# delante (se hicieron documentos en torio despues de migrar), volver a correr
+# la migracion no debe devolver la numeracion al valor de itrio.
+SOLO_SUBIR = {"gen_documento_tipo.consecutivo"}
 
 # gen_empresa desaparecio en reddoc2: sus datos viven en las columnas
 # gen_empresa_* de gen_configuracion. Se leen de la empresa enlazada en
@@ -687,18 +695,28 @@ $rescate$"""
                 if not filas:
                     continue
                 ids, valores = zip(*filas)
-                with self.destino.cursor() as cursor:
-                    cursor.execute(sql.SQL("""
-                        UPDATE {esquema}.{tabla} t
-                           SET {columna} = v.valor::{tipo}
-                          FROM unnest(%s::text[], %s::text[]) AS v(id, valor)
-                         WHERE t.id::text = v.id
-                           AND t.{columna} IS DISTINCT FROM v.valor::{tipo}""").format(
-                        esquema=sql.Identifier(self.esquema), tabla=sql.Identifier(tabla),
-                        columna=sql.Identifier(columna), tipo=sql.SQL(tipo)),
-                        (list(ids), list(valores)))
-                    actualizadas[f"{tabla}.{columna}"] = cursor.rowcount
-                self.destino.commit()
+                clave = f"{tabla}.{columna}"
+                comparar = ">" if clave in SOLO_SUBIR else "IS DISTINCT FROM"
+                try:
+                    with self.destino.cursor() as cursor:
+                        cursor.execute(sql.SQL("""
+                            UPDATE {esquema}.{tabla} t
+                               SET {columna} = v.valor::{tipo}
+                              FROM unnest(%s::text[], %s::text[]) AS v(id, valor)
+                             WHERE t.id::text = v.id
+                               AND v.valor IS NOT NULL
+                               AND (t.{columna} IS NULL OR v.valor::{tipo} {comparar} t.{columna})""").format(
+                            esquema=sql.Identifier(self.esquema), tabla=sql.Identifier(tabla),
+                            columna=sql.Identifier(columna), tipo=sql.SQL(tipo),
+                            comparar=sql.SQL(comparar)),
+                            (list(ids), list(valores)))
+                        actualizadas[clave] = cursor.rowcount
+                    self.destino.commit()
+                except psycopg2.Error as e:
+                    # Por ejemplo, una cuenta o resolucion que no entro al destino.
+                    self.destino.rollback()
+                    self.errores.append(f"[{clave}] copiar del origen: {mensaje_error(e)}")
+                    aviso(f"No se pudo copiar {clave} del origen: {mensaje_error(e)}")
         return actualizadas
 
     @staticmethod
