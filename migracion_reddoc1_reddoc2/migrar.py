@@ -133,11 +133,18 @@ REGLAS = {
 
 # Columnas que se copian del origen aunque la fila ya exista en el destino. El
 # ON CONFLICT DO NOTHING conserva la fila del destino entera; estas columnas se
-# sobrescriben despues, por id, con el valor del origen tal cual.
+# sobrescriben despues, por id, con el valor del origen tal cual. Una columna
+# que cambio de nombre se escribe como par (columna del destino, del origen).
 COPIAR_SIEMPRE = {
     # El destino trae los tipos de documento precargados con consecutivo 1:
     # sin esto la numeracion arrancaria de nuevo y repetiria documentos.
     "gen_documento_tipo": ["consecutivo"],
+    # La configuracion la crea torio con el tenant, asi que la fila del origen
+    # nunca entra; los textos de la factura ademas cambiaron de nombre.
+    "gen_configuracion": [
+        ("ven_factura_informacion_inferior", "informacion_factura"),
+        ("ven_factura_informacion_superior", "informacion_factura_superior"),
+    ],
 }
 
 # gen_empresa desaparecio en reddoc2: sus datos viven en las columnas
@@ -668,10 +675,14 @@ $rescate$"""
                 continue
             tabla_origen = self.nombre_en_origen.get(tabla, tabla)
             for columna in columnas:
+                columna, columna_origen = columna if isinstance(columna, tuple) else (columna, columna)
+                if columna_origen not in self.catalogo_origen.get(tabla_origen, {}) \
+                        or columna not in self.catalogo_destino.get(tabla, {}):
+                    continue
                 tipo = self.catalogo_destino[tabla][columna]
                 with self.origen.cursor() as cursor:
                     cursor.execute(sql.SQL("SELECT id::text, {}::text FROM {}.{}").format(
-                        sql.Identifier(columna), sql.Identifier(self.esquema), sql.Identifier(tabla_origen)))
+                        sql.Identifier(columna_origen), sql.Identifier(self.esquema), sql.Identifier(tabla_origen)))
                     filas = cursor.fetchall()
                 if not filas:
                     continue
