@@ -18,8 +18,13 @@ tarea crear_contenedor), en el mismo orden:
   4. `listo`.
 Si algo falla despues del paso 1 se borra el cliente con su schema: o queda el
 tenant completo o no queda nada.
+
+La imagen del contenedor, si viene, se sube al final con contenedor.imagen
+(igual que desde la aplicacion), tambien a un tenant que ya existia y no tiene
+imagen. Que falle no deshace el tenant: el resultado lo dice en "imagen".
 """
 
+import base64
 import json
 import os
 import sys
@@ -34,8 +39,10 @@ import django  # noqa: E402
 django.setup()
 
 from django.conf import settings  # noqa: E402
+from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
 from django.db import connection, transaction  # noqa: E402
 
+from contenedor import imagen as imagen_contenedor  # noqa: E402
 from contenedor.models import CtnCliente, CtnDominio, CtnSuscripcion, CtnSuscripcionTipo  # noqa: E402
 from contenedor.tasks import _construir  # noqa: E402
 from contenedor.views.cliente import DIAS_PRUEBA, SUSCRIPCION_TIPO_PRUEBA_ID  # noqa: E402
@@ -95,13 +102,30 @@ def registrar(datos):
     return cliente
 
 
+def poner_imagen(cliente, imagen):
+    """Sube la imagen del contenedor si viene y el cliente no tiene. Devuelve
+    "subida", el motivo por el que no se pudo, o None si no habia nada que hacer."""
+    if not imagen or cliente.imagen_uuid:
+        return None
+    # Sin content-type declarado: torio decide el formato por los bytes, y en
+    # itrio hay logos .jpg que en realidad son PNG.
+    archivo = SimpleUploadedFile(imagen["nombre"], base64.b64decode(imagen["datos"]),
+                                 content_type="application/octet-stream")
+    try:
+        imagen_contenedor.subir(archivo, cliente)
+    except Exception as e:
+        return f"no se pudo subir la imagen: {e}"
+    return "subida"
+
+
 def main():
     entrada = json.load(sys.stdin)
     validar_base(entrada["base"])
     datos, miembros = entrada["cliente"], entrada["miembros"]
 
-    if CtnCliente.objects.filter(schema_name=datos["schema_name"]).exists():
-        responder(estado="existe")
+    existente = CtnCliente.objects.filter(schema_name=datos["schema_name"]).first()
+    if existente:
+        responder(estado="existe", imagen=poner_imagen(existente, entrada.get("imagen")))
 
     ids = {m["usuario_id"] for m in miembros} | {datos["owner_id"]}
     faltan = sorted(ids - set(SegUsuario.objects.filter(pk__in=ids).values_list("pk", flat=True)))
@@ -132,7 +156,10 @@ def main():
         CtnCliente.objects.get(pk=cliente.pk).delete(force_drop=True)
         responder(estado="error", detalle=detalle)
 
-    responder(estado="creado", id=cliente.pk, miembros=len(ids))
+    connection.set_schema_to_public()
+    cliente.refresh_from_db()
+    responder(estado="creado", id=cliente.pk, miembros=len(ids),
+              imagen=poner_imagen(cliente, entrada.get("imagen")))
 
 
 if __name__ == "__main__":

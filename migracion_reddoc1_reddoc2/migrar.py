@@ -49,6 +49,10 @@ lado; sin ellas los datos se migran igual y los archivos se saltan con aviso:
   ITRIO_B2_KEY_ID/APP_KEY/BUCKET   bucket de itrio (basta solo lectura)
   TORIO_B2_KEY_ID/APP_KEY/BUCKET   bucket privado de torio (B2_BUCKET_PRIVADO)
   TORIO_B2_CDN_URL                 opcional, como B2_CDN_URL_PUBLICO de torio
+Para la imagen del contenedor (ctn_cliente.imagen_uuid), el bucket publico de
+torio; sin estas claves el tenant se crea igual, sin imagen y con aviso:
+  TORIO_B2_PUBLICO_KEY_ID/APP_KEY/BUCKET   bucket publico (B2_BUCKET_PUBLICO)
+  TORIO_B2_ENDPOINT_URL            opcional, si no es el B2_ENDPOINT_URL de torio
 Para crear tenants se usa el codigo de torio (TORIO_DIR, con su entorno
 TORIO_PYTHON; por defecto /home/desarrollo/proyectos/torio y ~/.venvs/torio),
 pero no su .env: la base es siempre la de PG_DESTINO y el dominio el de
@@ -198,6 +202,12 @@ RETURNING gen_empresa_ciudad_id, gen_empresa_identificacion_id"""
 LOGOS_ITRIO = "https://semantica.sfo3.digitaloceanspaces.com/"
 LOGO_DEFECTO_ITRIO = "logo_defecto"
 LADO_MAXIMO_LOGOTIPO = 400
+
+# La imagen del contenedor (la que se ve en la lista de contenedores) es otra
+# cosa: en itrio, cnt_contenedor.imagen con una ruta en el mismo Spaces; en
+# torio, ctn_cliente.imagen_uuid apuntando a un juego original/miniatura en el
+# bucket publico de B2. La procesa y la sube crear_tenant_torio.py con el codigo
+# de torio (contenedor/imagen.py); aqui solo se descarga.
 
 # Archivos adjuntos. En itrio el archivo esta en su bucket B2 con la ruta
 # <schema>/<uuid>_<nombre> y gen_archivo.almacenamiento_id guarda el file id de
@@ -1190,6 +1200,7 @@ ORDER BY c.schema_name"""
 SQL_TENANT_ORIGEN = """
 SELECT c.id, c.schema_name, c.nombre, c.usuario_id AS owner_id, c.fecha AS fecha_creacion,
        c.fecha_ultima_conexion, lower(u.username) AS correo, coalesce(u.telefono, '') AS celular,
+       c.imagen,
        p.venta, p.compra, p.tesoreria, p.cartera, p.inventario, p.humano, p.contabilidad
 FROM public.cnt_contenedor c
 JOIN public.seguridad_user u ON u.id = c.usuario_id
@@ -1270,10 +1281,41 @@ def preguntar_archivos(schema):
         error("Responda s o n.")
 
 
-def crear_tenant(schema):
+def entorno_imagen_contenedor():
+    """Variables para que torio suba la imagen del contenedor al bucket publico
+    del destino, o None si faltan las claves. Sin ellas no se sube nada: torio
+    usaria las de su .env, que pueden ser de otro ambiente."""
+    claves = {n: config(f"TORIO_B2_PUBLICO_{n}", default="").strip() for n in ("KEY_ID", "APP_KEY", "BUCKET")}
+    if not all(claves.values()):
+        return None
+    entorno = {"B2_KEY_ID_PUBLICO": claves["KEY_ID"], "B2_APP_KEY_PUBLICO": claves["APP_KEY"],
+               "B2_BUCKET_PUBLICO": claves["BUCKET"]}
+    endpoint = config("TORIO_B2_ENDPOINT_URL", default="").strip()
+    if endpoint:
+        entorno["B2_ENDPOINT_URL"] = endpoint
+    return entorno
+
+
+def imagen_contenedor(ruta):
+    """La imagen del contenedor de itrio tal cual (base64), o None si no tiene o
+    no se pudo descargar. Torio valida el formato por el contenido."""
+    if not ruta or LOGO_DEFECTO_ITRIO in ruta:
+        return None
+    url = LOGOS_ITRIO + ruta
+    try:
+        respuesta = requests.get(url, timeout=30)
+        respuesta.raise_for_status()
+    except requests.RequestException as e:
+        aviso(f"Contenedor: no se pudo descargar la imagen {url}: {e}")
+        return None
+    return {"nombre": os.path.basename(ruta), "datos": base64.b64encode(respuesta.content).decode("ascii")}
+
+
+def crear_tenant(schema, existe=False):
     """Crea el tenant en torio con crear_tenant_torio.py, dentro del entorno de
     torio. El dueno es propietario con todos los modulos; control e invitado
-    entran como superusuarios con los modulos que incluia su plan en itrio."""
+    entran como superusuarios con los modulos que incluia su plan en itrio.
+    Si el tenant ya existe solo le pone la imagen del contenedor, si le falta."""
     origen = conectar(leer_conexion("PG_ORIGEN"), "origen")
     with origen.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         cursor.execute(SQL_TENANT_ORIGEN, (schema,))
@@ -1293,7 +1335,15 @@ def crear_tenant(schema):
                    | {"nombre": tenant["nombre"] or schema},
         "miembros": [{"usuario_id": m["usuario_id"], "propietario": m["rol"] == "propietario",
                       "is_superuser": True, "accesos": accesos_plan} for m in miembros],
+        "imagen": None,
     }
+
+    entorno_imagen = entorno_imagen_contenedor()
+    if entorno_imagen is None:
+        if tenant["imagen"] and LOGO_DEFECTO_ITRIO not in tenant["imagen"]:
+            aviso("Contenedor: faltan TORIO_B2_PUBLICO_* en .env; el tenant queda sin imagen")
+    else:
+        entrada["imagen"] = imagen_contenedor(tenant["imagen"])
 
     # Torio se ejecuta con su codigo pero contra el destino de migrar.py: las
     # variables de entorno mandan sobre el .env de torio (python-decouple).
@@ -1305,9 +1355,10 @@ def crear_tenant(schema):
         "DATABASE_HOST": destino["host"], "DATABASE_PORT": destino["port"],
         "DATABASE_NAME": destino["dbname"], "DATABASE_USER": destino["user"],
         "DATABASE_CLAVE": destino["password"], "TENANT_BASE_DOMAIN": dominio,
-    }
-    info(f"Creando el tenant {schema} en {destino['user']}@{destino['host']}:{destino['port']}/"
-         f"{destino['dbname']}, dominio {schema}.{dominio} (migraciones y catalogos, puede tardar)...")
+    } | (entorno_imagen or {})
+    if not existe:
+        info(f"Creando el tenant {schema} en {destino['user']}@{destino['host']}:{destino['port']}/"
+             f"{destino['dbname']}, dominio {schema}.{dominio} (migraciones y catalogos, puede tardar)...")
     try:
         proceso = subprocess.run(
             [TORIO_PYTHON, str(DIR_SCRIPT / "crear_tenant_torio.py")],
@@ -1327,6 +1378,11 @@ def crear_tenant(schema):
     else:
         ok(f"Tenant {schema} creado en torio (id {resultado['id']}, {resultado['miembros']} miembros, "
            "suscripcion de prueba)")
+    imagen = resultado.get("imagen")
+    if imagen == "subida":
+        ok("Imagen del contenedor subida")
+    elif imagen:
+        aviso(f"Contenedor: {imagen}")
     print()
 
 
@@ -1370,8 +1426,10 @@ def main():
         return
     schema, existe = elegir_tenant(args)
     args.archivos = preguntar_archivos(schema)
-    if not existe:
-        crear_tenant(schema)
+    # Con el tenant ya creado solo se completa la imagen del contenedor; el
+    # ensayo no escribe nada, tampoco eso.
+    if not existe or not args.simulacion:
+        crear_tenant(schema, existe)
     migrador = Migrador(args, schema)
     migrador.encabezado()
     if args.simulacion:
