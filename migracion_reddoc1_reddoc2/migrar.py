@@ -54,7 +54,7 @@ torio; sin estas claves el tenant se crea igual, sin imagen y con aviso:
   TORIO_B2_PUBLICO_KEY_ID/APP_KEY/BUCKET   bucket publico (B2_BUCKET_PUBLICO)
   TORIO_B2_ENDPOINT_URL            opcional, si no es el B2_ENDPOINT_URL de torio
 Para crear tenants se usa el codigo de torio (TORIO_DIR, con su entorno
-TORIO_PYTHON; por defecto /home/desarrollo/proyectos/torio y ~/.venvs/torio),
+TORIO_PYTHON; por defecto /home/desarrollo/proyectos/torio y su .venv),
 pero no su .env: la base es siempre la de PG_DESTINO y el dominio el de
   TORIO_TENANT_BASE_DOMAIN         el TENANT_BASE_DOMAIN del torio de destino
                                    (localhost en desarrollo)
@@ -85,7 +85,7 @@ from decouple import config
 
 DIR_SCRIPT = Path(__file__).resolve().parent
 TORIO_DIR = config("TORIO_DIR", default="/home/desarrollo/proyectos/torio")
-TORIO_PYTHON = config("TORIO_PYTHON", default=os.path.expanduser("~/.venvs/torio/bin/python"))
+TORIO_PYTHON = config("TORIO_PYTHON", default=os.path.join(TORIO_DIR, ".venv/bin/python"))
 
 # Tablas de control de Django: migrarlas romperia el estado de migraciones.
 EXCLUIDAS = ["django_migrations", "django_content_type", "django_session"]
