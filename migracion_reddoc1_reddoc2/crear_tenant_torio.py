@@ -29,7 +29,7 @@ import json
 import os
 import sys
 import traceback
-from datetime import date, timedelta
+from datetime import date
 
 sys.path.insert(0, os.getcwd())
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "torioapp.settings.dev")
@@ -45,8 +45,11 @@ from django.db import connection, transaction  # noqa: E402
 from contenedor import imagen as imagen_contenedor  # noqa: E402
 from contenedor.models import CtnCliente, CtnDominio, CtnSuscripcion, CtnSuscripcionTipo  # noqa: E402
 from contenedor.tasks import _construir  # noqa: E402
-from contenedor.views.cliente import DIAS_PRUEBA, SUSCRIPCION_TIPO_PRUEBA_ID  # noqa: E402
+from contenedor.views.cliente import SUSCRIPCION_TIPO_PRUEBA_ID  # noqa: E402
 from seguridad.models import CAMPOS_ACCESO, SegUsuario, SegUsuarioCliente  # noqa: E402
+
+# Los tenants migrados tienen la suscripcion de prueba hasta esta fecha.
+FECHA_FIN_SUSCRIPCION = date(2026, 11, 30)
 
 
 def responder(**resultado):
@@ -95,7 +98,7 @@ def registrar(datos):
             usuario_id=cliente.owner_id,
             suscripcion_tipo=CtnSuscripcionTipo.objects.get(pk=SUSCRIPCION_TIPO_PRUEBA_ID),
             fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_inicio + timedelta(days=DIAS_PRUEBA),
+            fecha_fin=FECHA_FIN_SUSCRIPCION,
             frecuencia=CtnSuscripcion.FRECUENCIA_PRUEBA,
         )
         cliente.save(update_fields=["suscripcion"])

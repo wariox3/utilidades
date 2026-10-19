@@ -2,7 +2,7 @@
 .env.*
 *.bak
 .vscode/
-.venv
+.venv/
 pruebas_servicio/resultado/
 
 # Carpetas de cache
