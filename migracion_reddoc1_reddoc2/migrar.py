@@ -146,6 +146,15 @@ COPIAR_SIEMPRE = {
     # documentos, y se perderian la resolucion y las cuentas por cobrar y por
     # pagar de cada tipo. Los ids de gen_resolucion y con_cuenta se conservan.
     "gen_documento_tipo": ["consecutivo", "resolucion_id", "cuenta_cobrar_id", "cuenta_pagar_id"],
+    # Igual que los tipos de documento: torio precarga los impuestos y la
+    # configuracion de aportes y provisiones de nomina con los mismos ids,
+    # pero sin cuentas contables.
+    "gen_impuesto": ["cuenta_id"],
+    "hum_configuracion_aporte": ["cuenta_id"],
+    "hum_configuracion_provision": ["cuenta_debito_id", "cuenta_credito_id"],
+    # Los recargos festivos de itrio ya van con el aumento de julio de 2026
+    # (recargo festivo diurno 90 %); el catalogo de torio sigue en 80 %.
+    "hum_concepto": ["porcentaje"],
     # La configuracion la crea torio con el tenant, asi que la fila del origen
     # nunca entra; los textos de la factura ademas cambiaron de nombre.
     "gen_configuracion": [
@@ -158,6 +167,15 @@ COPIAR_SIEMPRE = {
 # delante (se hicieron documentos en torio despues de migrar), volver a correr
 # la migracion no debe devolver la numeracion al valor de itrio.
 SOLO_SUBIR = {"gen_documento_tipo.consecutivo"}
+
+# Tablas que torio precarga con valores por defecto y que, si el origen trae
+# filas, se reemplazan enteras por las del origen. Con COPIAR_SIEMPRE no basta
+# porque los ids no coinciden: el mismo id es otra combinacion de concepto y
+# tipo de costo en cada lado. Sin esto quedaria una mezcla (las filas de torio
+# ganan por id y solo entran las de itrio con ids mas altos) y la
+# contabilizacion de nomina tomaria la cuenta por defecto de torio en vez de la
+# que configuro el tenant. Si el origen no trae filas, se conserva lo de torio.
+REEMPLAZAR_CON_ORIGEN = {"hum_concepto_cuenta"}
 
 # gen_empresa desaparecio en reddoc2: sus datos viven en las columnas
 # gen_empresa_* de gen_configuracion. Se leen de la empresa enlazada en
@@ -491,13 +509,22 @@ class Migrador:
         archivo.seek(0)
         cursor.copy_expert(f"COPY _dat ({columnas.copia}) FROM STDIN", archivo)
 
+    def sql_vaciar(self, tabla):
+        """DELETE previo a la carga para las tablas de REEMPLAZAR_CON_ORIGEN;
+        va en la misma transaccion que el INSERT, asi que si la carga falla la
+        tabla queda como estaba."""
+        if tabla not in REEMPLAZAR_CON_ORIGEN:
+            return ""
+        return f"DELETE FROM {ident(self.esquema)}.{ident(tabla)}; "
+
     def sql_masiva(self, tabla, columnas):
-        return (f"INSERT INTO {ident(self.esquema)}.{ident(tabla)} ({columnas.destino}) "
+        return (f"{self.sql_vaciar(tabla)}"
+                f"INSERT INTO {ident(self.esquema)}.{ident(tabla)} ({columnas.destino}) "
                 f"SELECT {columnas.masiva} FROM _dat d ON CONFLICT DO NOTHING")
 
     def sql_rescate(self, tabla, columnas):
         # Fila a fila, saltando las que no entran.
-        return f"""
+        return f"""{self.sql_vaciar(tabla)}
 DO $rescate$
 DECLARE r record;
 BEGIN
@@ -565,7 +592,9 @@ $rescate$"""
 
                 fila["estado"], fila["motivo"] = self.ensayar_tabla(cursor, tabla, columnas, archivo)
                 if fila["estado"] != "falla":
-                    fila["insertadas"] = contar(self.destino, self.esquema, tabla) - fila["destino"]
+                    # En las tablas que se reemplazan, todo lo que queda viene del origen.
+                    previas = 0 if tabla in REEMPLAZAR_CON_ORIGEN else fila["destino"]
+                    fila["insertadas"] = contar(self.destino, self.esquema, tabla) - previas
                 cursor.execute("DROP TABLE IF EXISTS _dat")
 
         self.destino.rollback()
@@ -976,7 +1005,7 @@ $secuencias$""").format(esquema=sql.Literal(self.esquema))
                     vacias += 1
                     continue
 
-                antes = contar(self.destino, self.esquema, tabla)
+                antes = 0 if tabla in REEMPLAZAR_CON_ORIGEN else contar(self.destino, self.esquema, tabla)
                 self.destino.commit()
                 estado = self.migrar_tabla(tabla, columnas, archivo)
                 insertadas = contar(self.destino, self.esquema, tabla) - antes
