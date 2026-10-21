@@ -133,6 +133,22 @@ REGLAS = {
     # electronico_id paso de integer a uuid y los ids viejos no tienen
     # equivalente: el documento migra sin el vinculo electronico.
     "gen_documento.electronico_id": "NULL",
+    # total_bruto cambio de significado: en itrio es subtotal + impuesto (o 0) y
+    # en torio es el neto de la linea antes de impuestos, que contabilizar lleva
+    # al ingreso o al costo. El subtotal de itrio ya viene neto de descuento, asi
+    # que es justo ese valor. Sin esto el asiento queda descuadrado por el IVA.
+    # El encabezado se alinea despues de cargar las lineas (ajustar_total_bruto).
+    "gen_documento_detalle.total_bruto": 'o."subtotal"::numeric',
+    # En torio el subtotal es antes del descuento (cantidad x precio) y en itrio
+    # ya viene con el descuento restado; el descuento se guarda igual en los dos.
+    "gen_documento_detalle.subtotal": 'o."subtotal"::numeric + o."descuento"::numeric',
+    "gen_documento.subtotal": 'o."subtotal"::numeric + o."descuento"::numeric',
+    # itrio guarda la retencion en negativo (total = subtotal + impuesto +
+    # retencion) y torio en positivo (total = total_bruto + impuesto - retencion).
+    # El total no cambia. Las retenciones de gen_documento_impuesto ya vienen en
+    # positivo y no se tocan.
+    "gen_documento_detalle.impuesto_retencion": 'abs(o."impuesto_retencion"::numeric)',
+    "gen_documento.impuesto_retencion": 'abs(o."impuesto_retencion"::numeric)',
 }
 
 # Columnas que se copian del origen aunque la fila ya exista en el destino. El
@@ -945,6 +961,38 @@ $rescate$"""
                 info(f"  {numero} de {len(pendientes)}")
         return conteo
 
+    def ajustar_total_bruto(self):
+        """Deja el total_bruto de cada documento en la suma de sus lineas, como
+        lo hace recalcular_totales en torio; devuelve los documentos tocados.
+
+        No puede ir como regla al insertar gen_documento: el encabezado se carga
+        antes que sus lineas. Tampoco sirve el subtotal de itrio, que en algunos
+        documentos no coincide con la suma de las lineas. Solo toca documentos
+        con lineas de item, y los creados en torio ya cumplen la igualdad, asi
+        que volver a correrlo no cambia nada."""
+        if "gen_documento" not in self.plan or "gen_documento_detalle" not in self.plan:
+            return 0
+        consulta = sql.SQL("""
+UPDATE {esquema}.gen_documento g
+   SET total_bruto = x.tb
+  FROM (SELECT documento_id, SUM(total_bruto) AS tb
+          FROM {esquema}.gen_documento_detalle
+         GROUP BY documento_id
+        HAVING bool_or(tipo_registro = 'I')) x
+ WHERE g.id = x.documento_id
+   AND g.total_bruto IS DISTINCT FROM x.tb""").format(esquema=sql.Identifier(self.esquema))
+        try:
+            with self.destino.cursor() as cursor:
+                cursor.execute(consulta)
+                tocados = cursor.rowcount
+            self.destino.commit()
+            return tocados
+        except psycopg2.Error as e:
+            self.destino.rollback()
+            self.errores.append(f"[gen_documento.total_bruto] ajustar: {mensaje_error(e)}")
+            aviso(f"No se pudo ajustar gen_documento.total_bruto: {mensaje_error(e)}")
+            return 0
+
     def ajustar_secuencias(self):
         # Las secuencias quedan atras si se insertaron ids explicitos.
         info(f"Ajustando secuencias del esquema {self.esquema}...")
@@ -1030,6 +1078,10 @@ $secuencias$""").format(esquema=sql.Literal(self.esquema))
             if empresas:
                 info(f"Datos de gen_empresa copiados a gen_configuracion: {empresas}")
                 log.write(f"[gen_configuracion] datos de gen_empresa copiados: {empresas}\n")
+            documentos = self.ajustar_total_bruto()
+            if documentos:
+                info(f"total_bruto de gen_documento alineado con sus lineas: {documentos}")
+                log.write(f"[gen_documento.total_bruto] alineado con sus lineas: {documentos}\n")
             self.ajustar_secuencias()
             if not self.args.archivos:
                 log.write("[gen_archivo] no se migraron: se escogio no migrar archivos\n")
