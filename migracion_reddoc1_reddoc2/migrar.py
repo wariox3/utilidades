@@ -74,6 +74,7 @@ import sys
 import tempfile
 import uuid as uuid_lib
 from pathlib import Path
+from urllib.parse import quote
 
 import psycopg2
 import psycopg2.extras
@@ -1428,11 +1429,17 @@ def crear_tenant(schema, existe=False):
 
     # Torio se ejecuta con su codigo pero contra el destino de migrar.py: las
     # variables de entorno mandan sobre el .env de torio (python-decouple).
+    # crear_tenant_torio.py valida que Django quede conectado a esta base.
     destino = leer_conexion("PG_DESTINO")
     dominio = config("TORIO_TENANT_BASE_DOMAIN", default="").strip()
     if not dominio:
         morir("Falta TORIO_TENANT_BASE_DOMAIN en .env: el dominio del tenant sera <schema>.<ese valor>")
+    # Torio lee la base de DATABASE_URL; usuario y clave van codificados
+    # porque pueden traer caracteres como @ = ( que rompen la URL.
+    url_destino = (f"postgres://{quote(destino['user'], safe='')}:{quote(destino['password'], safe='')}"
+                   f"@{destino['host']}:{destino['port']}/{quote(destino['dbname'], safe='')}")
     entorno = os.environ | {
+        "DATABASE_URL": url_destino,
         "DATABASE_HOST": destino["host"], "DATABASE_PORT": destino["port"],
         "DATABASE_NAME": destino["dbname"], "DATABASE_USER": destino["user"],
         "DATABASE_CLAVE": destino["password"], "TENANT_BASE_DOMAIN": dominio,
