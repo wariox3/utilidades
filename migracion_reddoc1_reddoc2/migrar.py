@@ -131,6 +131,8 @@ REGLAS = {
     # En hum_contrato grupo_id sigue siendo el grupo de nomina; el centro de
     # costo venia en grupo_contabilidad_id.
     "hum_contrato.centro_costo_id": 'o."grupo_contabilidad_id"::bigint',
+    # Mismo rename en la cuenta: exige_grupo paso a llamarse exige_centro_costo.
+    "con_cuenta.exige_centro_costo": 'o."exige_grupo"::boolean',
     # electronico_id paso de integer a uuid y los ids viejos no tienen
     # equivalente: el documento migra sin el vinculo electronico.
     "gen_documento.electronico_id": "NULL",
