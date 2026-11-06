@@ -11,10 +11,11 @@ linea de stdout un JSON con el resultado: {"estado": "creado" | "existe" | "erro
 Hace lo mismo que torio al crear un contenedor (CtnClienteViewSet.create y la
 tarea crear_contenedor), en el mismo orden:
   1. CtnCliente en `creando`, su schema vacio, su dominio, la membresia del
-     dueno (propietario, todos los modulos) y la suscripcion de prueba.
+     dueno (propietario e is_superuser, sin grupos) y la suscripcion de prueba.
   2. contenedor.tasks._construir: migraciones del tenant, permisos del dueno
-     (is_superuser) y catalogos con `cargar_datos_tenant --inicial`.
-  3. El resto de miembros con CtnCliente.add_user.
+     y catalogos con `cargar_datos_tenant --inicial`.
+  3. El resto de miembros con CtnCliente.add_user, con todos los grupos de
+     seguridad.grupos (seg_usuario_cliente_grupo) y sin is_superuser.
   4. `listo`.
 Si algo falla despues del paso 1 se borra el cliente con su schema: o queda el
 tenant completo o no queda nada.
@@ -46,7 +47,10 @@ from contenedor import imagen as imagen_contenedor  # noqa: E402
 from contenedor.models import CtnCliente, CtnDominio, CtnSuscripcion, CtnSuscripcionTipo  # noqa: E402
 from contenedor.tasks import _construir  # noqa: E402
 from contenedor.views.cliente import SUSCRIPCION_TIPO_PRUEBA_ID  # noqa: E402
-from seguridad.models import CAMPOS_ACCESO, SegUsuario, SegUsuarioCliente  # noqa: E402
+from django.contrib.auth.models import Group  # noqa: E402
+
+from seguridad.grupos import GRUPOS  # noqa: E402
+from seguridad.models import SegUsuario, SegUsuarioCliente  # noqa: E402
 
 # Los tenants migrados tienen la suscripcion de prueba hasta esta fecha.
 FECHA_FIN_SUSCRIPCION = date(2026, 11, 30)
@@ -88,9 +92,10 @@ def registrar(datos):
         CtnDominio.objects.create(
             domain=f"{cliente.schema_name}.{settings.TENANT_BASE_DOMAIN}", is_primary=True, tenant=cliente,
         )
+        # Igual que CtnClienteViewSet.create: el dueno no lleva grupos, con
+        # is_superuser tiene todo.
         SegUsuarioCliente.objects.create(
-            usuario_id=cliente.owner_id, cliente=cliente, propietario=True,
-            **dict.fromkeys(CAMPOS_ACCESO, True),
+            usuario_id=cliente.owner_id, cliente=cliente, propietario=True, is_superuser=True,
         )
         fecha_inicio = date.today()
         cliente.suscripcion = CtnSuscripcion.objects.create(
@@ -128,6 +133,12 @@ def main():
 
     existente = CtnCliente.objects.filter(schema_name=datos["schema_name"]).first()
     if existente:
+        # Una creacion cortada a mano (Ctrl+C) no alcanza a deshacerse y deja el
+        # cliente en `creando`, con el schema vacio: migrar ahi no sirve.
+        if existente.estado != CtnCliente.ESTADO_LISTO:
+            responder(estado="error", detalle=(
+                f"el tenant {existente.schema_name} (id {existente.pk}) esta en '{existente.estado}': "
+                "quedo a medias de una creacion anterior. Hay que borrarlo antes de volver a crearlo"))
         responder(estado="existe", imagen=poner_imagen(existente, entrada.get("imagen")))
 
     ids = {m["usuario_id"] for m in miembros} | {datos["owner_id"]}
@@ -135,6 +146,13 @@ def main():
     if faltan:
         responder(estado="error", detalle=f"usuarios que no existen en torio: {faltan}. "
                                           "Corra primero la opcion 1 (migrar usuarios)")
+
+    # Los que no son el dueno entran con todos los grupos del producto (con
+    # heredar_permisos, el valor por defecto) y sin permisos personalizados.
+    grupos = list(Group.objects.filter(pk__in=GRUPOS))
+    if len(grupos) != len(GRUPOS):
+        responder(estado="error", detalle="faltan grupos en auth_group: "
+                                          "corra en torio `manage.py sincronizar_grupos`")
 
     cliente = registrar(datos)
     try:
@@ -145,8 +163,7 @@ def main():
             cliente.add_user(
                 SegUsuario.objects.get(pk=miembro["usuario_id"]),
                 propietario=miembro["propietario"],
-                is_superuser=miembro["is_superuser"],
-                accesos=miembro["accesos"],
+                grupos=grupos,
             )
         CtnCliente.objects.filter(pk=cliente.pk).update(
             estado=CtnCliente.ESTADO_LISTO,

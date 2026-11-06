@@ -1284,18 +1284,13 @@ ORDER BY c.schema_name"""
 SQL_TENANT_ORIGEN = """
 SELECT c.id, c.schema_name, c.nombre, c.usuario_id AS owner_id, c.fecha AS fecha_creacion,
        c.fecha_ultima_conexion, lower(u.username) AS correo, coalesce(u.telefono, '') AS celular,
-       c.imagen,
-       p.venta, p.compra, p.tesoreria, p.cartera, p.inventario, p.humano, p.contabilidad
+       c.imagen
 FROM public.cnt_contenedor c
 JOIN public.seguridad_user u ON u.id = c.usuario_id
-LEFT JOIN public.cnt_plan p ON p.id = c.plan_id
 WHERE c.schema_name = %s"""
 
 SQL_MIEMBROS_ORIGEN = """
 SELECT usuario_id, rol FROM public.cnt_usuario_contenedor WHERE contenedor_id = %s ORDER BY usuario_id"""
-
-# Modulos del plan de itrio -> flags acceso_* de torio. turno no existia en itrio.
-MODULOS_PLAN = ("venta", "compra", "tesoreria", "cartera", "inventario", "humano", "contabilidad")
 
 
 def elegir_tenant(args):
@@ -1397,8 +1392,8 @@ def imagen_contenedor(ruta):
 
 def crear_tenant(schema, existe=False):
     """Crea el tenant en torio con crear_tenant_torio.py, dentro del entorno de
-    torio. El dueno es propietario con todos los modulos; control e invitado
-    entran como superusuarios con los modulos que incluia su plan en itrio.
+    torio. El dueno es propietario con is_superuser; control e invitado entran
+    con todos los grupos de torio (seg_usuario_cliente_grupo), sin is_superuser.
     Si el tenant ya existe solo le pone la imagen del contenedor, si le falta."""
     origen = conectar(leer_conexion("PG_ORIGEN"), "origen")
     with origen.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
@@ -1408,17 +1403,13 @@ def crear_tenant(schema, existe=False):
         miembros = cursor.fetchall()
     origen.close()
 
-    # Sin plan (no deberia pasar fuera de public) se dan todos los modulos.
-    con_plan = tenant["venta"] is not None
-    accesos_plan = {f"acceso_{m}": (tenant[m] if con_plan else True) for m in MODULOS_PLAN}
-    accesos_plan["acceso_turno"] = False
     entrada = {
         "base": {k: leer_conexion("PG_DESTINO")[k] for k in ("dbname", "host", "port")},
         "cliente": {k: tenant[k] for k in ("id", "schema_name", "owner_id", "fecha_creacion",
                                            "fecha_ultima_conexion", "correo", "celular")}
                    | {"nombre": tenant["nombre"] or schema},
-        "miembros": [{"usuario_id": m["usuario_id"], "propietario": m["rol"] == "propietario",
-                      "is_superuser": True, "accesos": accesos_plan} for m in miembros],
+        "miembros": [{"usuario_id": m["usuario_id"], "propietario": m["rol"] == "propietario"}
+                     for m in miembros],
         "imagen": None,
     }
 
