@@ -74,3 +74,4 @@ Migracion bdreddoc.alsekasas -> bdtorio.alsekasas | modo=completar | Mon Nov  9 
 [gen_archivo] sin migrar (B2) 31
 ---
 migradas=59 parciales=0 vacias=17 fallidas=0 filas=2866
+[gen_archivo] copiados 31 (migrados aparte, solo archivos, 2026-11-09 14:27:56)
