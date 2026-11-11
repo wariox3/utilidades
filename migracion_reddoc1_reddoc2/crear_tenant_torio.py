@@ -11,11 +11,11 @@ linea de stdout un JSON con el resultado: {"estado": "creado" | "existe" | "erro
 Hace lo mismo que torio al crear un contenedor (CtnClienteViewSet.create y la
 tarea crear_contenedor), en el mismo orden:
   1. CtnCliente en `creando`, su schema vacio, su dominio, la membresia del
-     dueno (propietario e is_superuser, sin grupos) y la suscripcion de prueba.
+     dueno (propietario, sin grupos) y la suscripcion de prueba.
   2. contenedor.tasks._construir: migraciones del tenant, permisos del dueno
      y catalogos con `cargar_datos_tenant --inicial`.
   3. El resto de miembros con CtnCliente.add_user, con todos los grupos de
-     seguridad.grupos (seg_usuario_cliente_grupo) y sin is_superuser.
+     seguridad.grupos (seg_usuario_cliente_grupo), sin propietario ni administrador.
   4. `listo`.
 Si algo falla despues del paso 1 se borra el cliente con su schema: o queda el
 tenant completo o no queda nada.
@@ -93,9 +93,9 @@ def registrar(datos):
             domain=f"{cliente.schema_name}.{settings.TENANT_BASE_DOMAIN}", is_primary=True, tenant=cliente,
         )
         # Igual que CtnClienteViewSet.create: el dueno no lleva grupos, con
-        # is_superuser tiene todo.
+        # propietario tiene todo.
         SegUsuarioCliente.objects.create(
-            usuario_id=cliente.owner_id, cliente=cliente, propietario=True, is_superuser=True,
+            usuario_id=cliente.owner_id, cliente=cliente, propietario=True,
         )
         fecha_inicio = date.today()
         cliente.suscripcion = CtnSuscripcion.objects.create(

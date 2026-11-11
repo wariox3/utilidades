@@ -1392,8 +1392,9 @@ def imagen_contenedor(ruta):
 
 def crear_tenant(schema, existe=False):
     """Crea el tenant en torio con crear_tenant_torio.py, dentro del entorno de
-    torio. El dueno es propietario con is_superuser; control e invitado entran
-    con todos los grupos de torio (seg_usuario_cliente_grupo), sin is_superuser.
+    torio. El dueno es propietario (tiene todo); control e invitado entran con
+    todos los grupos de torio (seg_usuario_cliente_grupo), sin propietario ni
+    administrador.
     Si el tenant ya existe solo le pone la imagen del contenedor, si le falta."""
     origen = conectar(leer_conexion("PG_ORIGEN"), "origen")
     with origen.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
